@@ -288,7 +288,8 @@ def load_model(opt):
         d_model=model_opt.d_model,
         d_word_vec=model_opt.d_word_vec,
         n_layers=model_opt.n_layers,
-        dropout=model_opt.dropout)
+        dropout=model_opt.dropout,
+        cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
 
@@ -425,7 +426,8 @@ def main():
             d_model=opt.d_model,
             d_word_vec=opt.d_word_vec,
             n_layers=opt.n_layers,
-            dropout=opt.dropout)
+            dropout=opt.dropout,
+            cuda=opt.cuda)
 
 
         #print(modelRNN)
