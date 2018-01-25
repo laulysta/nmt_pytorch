@@ -73,7 +73,7 @@ class Encoder(nn.Module):
 
         # Lengths data is wrapped inside a Variable.
         x_in_lens = x_in_lens.data.view(-1).tolist()
-        pack = self.tt.nn.utils.rnn.pack_padded_sequence(x_in_emb, x_in_lens, batch_first=True)
+        pack = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb, x_in_lens, batch_first=True)
 
         # input (batch_size, x_seq_len, D_emb)
         # h_0 (num_layers * num_dir, batch_size, D_hid)
@@ -82,7 +82,7 @@ class Encoder(nn.Module):
         # h_n (num_layers * num_dir, batch_size, D_hid)
 
         # attentional decoder : return the entire sequence of h_n
-        out, outlen = self.tt.nn.utils.rnn.pad_packed_sequence(top_layer, batch_first = True)
+        out, outlen = torch.nn.utils.rnn.pad_packed_sequence(top_layer, batch_first = True)
         return out.contiguous() # (batch_size, x_seq_len, D_hid * num_dir)
 
 
@@ -143,8 +143,8 @@ class Decoder(nn.Module):
         h_in_len = h_in_len.data.view(-1)
         xmask = xlen_to_mask_rnn(h_in_len.tolist(), self.tt) # (batch_size, x_seq_len)
 
-        s_0 = self.tt.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
-        s_0 = self.tt.div( s_0, Variable(self.tt.FloatTensor(h_in_len.tolist()).view(-1,1)) )
+        s_0 = torch.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
+        s_0 = torch.div( s_0, Variable(self.tt.FloatTensor(h_in_len.tolist()).view(-1,1)) )
         s_0 = self.ctx_to_s0(s_0)
         s_t = s_0 # (batch_size, n_layers * d_model)
         s_t = s_t.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
@@ -178,8 +178,8 @@ class Decoder(nn.Module):
             score = F.softmax( score )
             score = score[:,:,None] # (batch_size, x_seq_len, 1)
 
-            c_t = self.tt.mul( h_in, score ) # (batch_size, x_seq_len, d_ctx)
-            c_t = self.tt.sum( c_t, 1) # (batch_size, d_ctx)
+            c_t = torch.mul( h_in, score ) # (batch_size, x_seq_len, d_ctx)
+            c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
             out, s_t = self.rnn2( c_t[:,None,:], s_t_ )
@@ -195,7 +195,7 @@ class Decoder(nn.Module):
             logits.append( logit )
             # logits : list of (batch_size, vocab_size) vectors
 
-        ans = self.tt.cat(logits, 0) # (y_seq_len * batch_size, vocab_size)
+        ans = torch.cat(logits, 0) # (y_seq_len * batch_size, vocab_size)
         ans = ans.view(y_seq_len, batch_size, self.n_tgt_vocab).transpose(0,1).contiguous()
         return ans.view(batch_size * y_seq_len, -1)
 
@@ -207,8 +207,8 @@ class Decoder(nn.Module):
         batch_size, x_seq_len = h_in.size()[0], h_in.size()[1]
         xmask = xlen_to_mask_rnn(h_in_len, self.tt) # (batch_size, x_seq_len)
 
-        s_t = self.tt.sum(h_in, 1) # (batch_size, d_ctx)
-        s_t = self.tt.div( s_t, Variable(self.tt.FloatTensor(h_in_len).view(batch_size, 1)) )
+        s_t = torch.sum(h_in, 1) # (batch_size, d_ctx)
+        s_t = torch.div( s_t, Variable(self.tt.FloatTensor(h_in_len).view(batch_size, 1)) )
         s_t = self.ctx_to_s0(s_t)
         s_t = s_t.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
                 # (n_layers, batch_size, d_model)
@@ -243,8 +243,8 @@ class Decoder(nn.Module):
             score = F.softmax( score )
             score = score[:,:,None] # (batch_size, x_seq_len, 1)
 
-            c_t = self.tt.mul( h_in, score ) # (batch_size, x_seq_len, d_ctx)
-            c_t = self.tt.sum( c_t, 1) # (batch_size, d_ctx)
+            c_t = torch.mul( h_in, score ) # (batch_size, x_seq_len, d_ctx)
+            c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
             out, s_t = self.rnn2( c_t[:,None,:], s_t_ )
