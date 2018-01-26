@@ -271,7 +271,7 @@ class Decoder(nn.Module):
 
             y_in_emb = self.emb( Variable( topi ) )
 
-        return self.tt.IntTensor(gen_idx)
+        return torch.IntTensor(gen_idx)
 
 
 #class NMTmodel(nn.Module):
