@@ -104,10 +104,13 @@ class Decoder(nn.Module):
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
 
-        self.rnn1 = nn.GRU(d_word_vec, d_model, n_layers, \
-                           dropout=dropout, batch_first=True)
-        self.rnn2 = nn.GRU(d_ctx, d_model, \
-                           n_layers, dropout=dropout, batch_first=True)
+        self.emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=0)
+        self.rnn1 = nn.GRUCell(d_word_vec, d_model)
+        self.rnn2 = nn.GRUCell(d_ctx, d_model)
+        #self.rnn1 = nn.GRU(d_word_vec, d_model, n_layers, \
+        #                   dropout=dropout, batch_first=True)
+        #self.rnn2 = nn.GRU(d_ctx, d_model, \
+        #                   n_layers, dropout=dropout, batch_first=True)
         self.emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=0)
         self.drop = nn.Dropout(p=dropout)
         self.ctx_to_s0 = nn.Linear(d_ctx, n_layers * d_model)
@@ -162,9 +165,12 @@ class Decoder(nn.Module):
         for idx in range(y_seq_len):
             # in (batch_size, 1, d_word_vec)
             # s_t (n_layers, batch_size, d_model)
-            _, s_t_ = self.rnn1( y_in_emb[:,idx,:][:,None,:], s_t )
+            #_, s_t_ = self.rnn1( y_in_emb[:,idx,:][:,None,:], s_t )
+            #import ipdb; ipdb.set_trace()
+            s_t_ = self.rnn1( y_in_emb[:,idx,:], s_t[0] )[None,:,:]
             # out (batch_size, 1, d_model)
             # s_t (n_layers, batch_size, d_model)
+            #import ipdb; ipdb.set_trace()
             ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size, -1) \
                     # (batch_size, d_model * num_layers_dec)
 
@@ -182,7 +188,13 @@ class Decoder(nn.Module):
             c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
-            out, s_t = self.rnn2( c_t[:,None,:], s_t_ )
+            #out, s_t = self.rnn2( c_t[:,None,:], s_t_ )
+            #import ipdb; ipdb.set_trace()
+            ####################################################
+            s_t = self.rnn2( c_t, s_t_[0] )
+            out = s_t[:,None,:]
+            s_t = s_t[None,:,:]
+            ####################################################
             # out (batch_size, 1, d_model)
             # s_t (n_layers, batch_size, d_model)
 
@@ -227,7 +239,8 @@ class Decoder(nn.Module):
         for idx in range(self.n_max_seq):
             # in (batch_size, 1, d_word_vec)
             # s_t (n_layers, batch_size, d_model)
-            _, s_t_ = self.rnn1( y_in_emb, s_t )
+            #_, s_t_ = self.rnn1( y_in_emb, s_t )
+            s_t_ = self.rnn1( y_in_emb[:,0,:], s_t[0] )[None,:,:]
             # out (batch_size, 1, d_model)
             # s_t (n_layers, batch_size, d_model)
             ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size, self.n_layers * self.d_model) \
@@ -247,7 +260,12 @@ class Decoder(nn.Module):
             c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
-            out, s_t = self.rnn2( c_t[:,None,:], s_t_ )
+            #out, s_t = self.rnn2( c_t[:,None,:], s_t_ )
+            ####################################################
+            s_t = self.rnn2( c_t, s_t_[0] )
+            out = s_t[:,None,:]
+            s_t = s_t[None,:,:]
+            ####################################################
             # out (batch_size, 1, d_model)
             # s_t (n_layers, batch_size, d_model)
 
