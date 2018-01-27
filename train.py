@@ -104,6 +104,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
             nb_examples_save = training_data.nb_examples*pct_next_save
             epoch_i += opt.save_freq_pct
             save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i)
+            model.train()
 
         # note keeping
         gold = tgt[0][:, 1:]
@@ -152,7 +153,7 @@ def train(model, training_data, validation_data, validation_data_translate, crit
     p_validation = None
     valid_accus = []
     for ii in range(opt.epoch):
-        print('[ Epoch', epoch_i, ']')
+        print('[ Epoch', epoch_i+1, ']')
 
         start = time.time()
         train_loss, train_accu, epoch_i, nb_examples_seen, pct_next_save = train_epoch(model, training_data, validation_data,
@@ -174,6 +175,8 @@ def train(model, training_data, validation_data, validation_data_translate, crit
 
 
 def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, valid_accu=None, valid_accus=None):
+
+    model.eval()
 
     if opt.multi_gpu:
         model_state_dict = model.module.model.state_dict()
@@ -199,68 +202,34 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
 
     ###########################################################################################
     print('[ Epoch', epoch_i, ']')
-    if opt.external_validation_script:
-        print("Calling external validation script")
-        if p_validation is not None and p_validation.poll() is None:
-            print("Waiting for previous validation run to finish")
-            print("If this takes too long, consider increasing validation interval, reducing validation set size, or speeding up validation by using multiple processes")
-            valid_wait_start = time.time()
-            p_validation.wait()
-            print("Waited for {0:.1f} seconds".format(time.time()-valid_wait_start))
-        external_validation_script = [opt.external_validation_script[0], model_name, opt.external_validation_script[1], opt.external_validation_script[2], opt.data]
-        if opt.use_ctx or opt.use_ctx_dep_src or opt.use_gated_ctx:
-            external_validation_script.append(opt.external_validation_script[3])
-        p_validation = Popen(external_validation_script)
+    if opt.multi_gpu:
+        model_translate = model.module.model
     else:
-        # opt_translate = Namespace(beam_size=5, batch_size=40, n_best=1, cuda=opt.cuda)
-        # translator = Translator(opt_translate, load_model=False)
-        # if opt.multi_gpu:
-        #     translator.model = model.module.model
-        # else:
-        #     translator.model = model.model
-        # translator.model_opt = opt
-        # translator.model.prob_projection = nn.LogSoftmax()
-        # output_name = model_name + '.output.dev'
-        # with open(output_name, 'w') as f:
-        #     for batch in tqdm(validation_data_translate, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
-        #         all_hyp, all_scores = translator.translate_batch(batch, validation_data.src_idx2word, validation_data.tgt_idx2word)
-        #         for idx_seqs in all_hyp:
-        #             for idx_seq in idx_seqs:
-        #                 if idx_seq[-1] == Constants.EOS: # if last word is EOS
-        #                     idx_seq = idx_seq[:-1]
-        #                 pred_line = ' '.join([validation_data.tgt_idx2word[idx] for idx in idx_seq])
-        #                 f.write(pred_line + '\n')
+        model_translate = model.model
 
-        if opt.multi_gpu:
-            model_translate = model.module.model
-        else:
-            model_translate = model.model
+    output_name = model_name + '.output.dev'
+    with open(output_name, 'w') as f:
+        for batch in tqdm(validation_data_translate, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
+            #import ipdb; ipdb.set_trace()
+            src_seq, src_pos = batch
+            lengths_seq_src, idx_src = src_pos.max(1)
 
-        output_name = model_name + '.output.dev'
-        with open(output_name, 'w') as f:
-            for batch in tqdm(validation_data_translate, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
-                #import ipdb; ipdb.set_trace()
-                src_seq, src_pos = batch
-                lengths_seq_src, idx_src = src_pos.max(1)
+            _, sent_sort_idx = lengths_seq_src.sort(descending=True)
 
-                _, sent_sort_idx = lengths_seq_src.sort(descending=True)
+            enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
+            all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
 
-                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
-                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
+            _, sent_revert_idx = sent_sort_idx.sort()
+            sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
+            all_hyp = np.array(all_hyp)
+            all_hyp = all_hyp[sent_revert_idx]
 
-                _, sent_revert_idx = sent_sort_idx.sort()
-                sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
-                all_hyp = np.array(all_hyp)
-                all_hyp = all_hyp[sent_revert_idx]
-                #import ipdb; ipdb.set_trace()
-                #for idx_seqs in all_hyp:
-                for idx_seq in all_hyp:
-                    if idx_seq[-1] == Constants.EOS: # if last word is EOS
-                        idx_seq = idx_seq[:-1]
-                    pred_line = ' '.join([validation_data.tgt_idx2word[idx] for idx in idx_seq])
-                    f.write(pred_line + '\n')
-
-
+            #import ipdb; ipdb.set_trace()
+            for idx_seq in all_hyp:
+                if idx_seq[-1] == Constants.EOS: # if last word is EOS
+                    idx_seq = idx_seq[:-1]
+                pred_line = ' '.join([validation_data.tgt_idx2word[idx] for idx in idx_seq])
+                f.write(pred_line + '\n')
 
         #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
         out = subprocess.check_output("perl multi-bleu.perl " + opt.valid_bleu_ref + " < " + output_name, shell=True)
@@ -326,7 +295,7 @@ def main():
     parser.add_argument('-n_layers', type=int, default=1)
     parser.add_argument('-n_warmup_steps', type=int, default=4000)
 
-    parser.add_argument('-dropout', type=float, default=0.1)
+    parser.add_argument('-dropout', type=float, default=0.5)
     parser.add_argument('-embs_share_weight', action='store_true')
     parser.add_argument('-proj_share_weight', action='store_true')
 

@@ -168,6 +168,7 @@ class Decoder(nn.Module):
             #_, s_t_ = self.rnn1( y_in_emb[:,idx,:][:,None,:], s_t )
             #import ipdb; ipdb.set_trace()
             s_t_ = self.rnn1( y_in_emb[:,idx,:], s_t[0] )[None,:,:]
+            s_t_ = self.drop(s_t_)
             # out (batch_size, 1, d_model)
             # s_t (n_layers, batch_size, d_model)
             #import ipdb; ipdb.set_trace()
@@ -192,6 +193,7 @@ class Decoder(nn.Module):
             #import ipdb; ipdb.set_trace()
             ####################################################
             s_t = self.rnn2( c_t, s_t_[0] )
+            s_t = self.drop(s_t)
             out = s_t[:,None,:]
             s_t = s_t[None,:,:]
             ####################################################
@@ -241,6 +243,7 @@ class Decoder(nn.Module):
             # s_t (n_layers, batch_size, d_model)
             #_, s_t_ = self.rnn1( y_in_emb, s_t )
             s_t_ = self.rnn1( y_in_emb[:,0,:], s_t[0] )[None,:,:]
+            s_t_ = self.drop(s_t_)
             # out (batch_size, 1, d_model)
             # s_t (n_layers, batch_size, d_model)
             ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size, self.n_layers * self.d_model) \
@@ -263,6 +266,7 @@ class Decoder(nn.Module):
             #out, s_t = self.rnn2( c_t[:,None,:], s_t_ )
             ####################################################
             s_t = self.rnn2( c_t, s_t_[0] )
+            s_t = self.drop(s_t)
             out = s_t[:,None,:]
             s_t = s_t[None,:,:]
             ####################################################
