@@ -60,7 +60,7 @@ class MainModel(nn.Module):
         gold = tgt[0][:, 1:]
         
         pred = self.model(src, tgt)
-        pred = F.log_softmax(pred)
+        pred = F.log_softmax(pred, dim=1)
 
         loss = get_loss(self.crit, pred, gold, self.opt)
         #g_n_correct = n_correct # hack
@@ -250,6 +250,7 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
 
                 _, sent_revert_idx = sent_sort_idx.sort()
                 sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
+                all_hyp = np.array(all_hyp)
                 all_hyp = all_hyp[sent_revert_idx]
                 #import ipdb; ipdb.set_trace()
                 #for idx_seqs in all_hyp:

@@ -181,7 +181,7 @@ class Decoder(nn.Module):
 
             score = self.ctx_to_score(ctx).view(batch_size, -1) # (batch_size, x_seq_len)
             score.data.masked_fill_(xmask, -float('inf'))
-            score = F.softmax( score )
+            score = F.softmax(score, dim=1)
             score = score[:,:,None] # (batch_size, x_seq_len, 1)
 
             c_t = torch.mul( h_in, score ) # (batch_size, x_seq_len, d_ctx)
@@ -253,7 +253,7 @@ class Decoder(nn.Module):
 
             score = self.ctx_to_score(ctx).view(batch_size, -1) # (batch_size, x_seq_len)
             score.data.masked_fill_(xmask, -float('inf'))
-            score = F.softmax( score )
+            score = F.softmax(score, dim=1)
             score = score[:,:,None] # (batch_size, x_seq_len, 1)
 
             c_t = torch.mul( h_in, score ) # (batch_size, x_seq_len, d_ctx)
@@ -289,7 +289,7 @@ class Decoder(nn.Module):
 
             y_in_emb = self.emb( Variable( topi ) )
 
-        return torch.IntTensor(gen_idx)
+        return gen_idx
 
 
 #class NMTmodel(nn.Module):
