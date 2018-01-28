@@ -231,11 +231,14 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
                 pred_line = ' '.join([validation_data.tgt_idx2word[idx] for idx in idx_seq])
                 f.write(pred_line + '\n')
 
-        #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
-        out = subprocess.check_output("perl multi-bleu.perl " + opt.valid_bleu_ref + " < " + output_name, shell=True)
-        out = out.decode() # because out is binary
-        print(out)
+        try:
+            #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
+            out = subprocess.check_output("perl multi-bleu.perl " + opt.valid_bleu_ref + " < " + output_name, shell=True)
+            out = out.decode() # because out is binary
+        except:
+            out = "multi-bleu.perl error"
 
+        print(out)
         bleu_file = os.path.dirname(model_name) + '/bleu_scores.txt'
         with open(bleu_file, 'a') as f:
             f.write("Epoch "+str(epoch_i)+": "+out)

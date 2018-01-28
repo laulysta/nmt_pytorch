@@ -138,13 +138,15 @@ class Decoder(nn.Module):
         self.n_max_seq = n_max_seq
 
     def forward(self, h_in, h_in_len, y_in):
-        # h_in : (batch_size, x_seq_len, D_hid_enc * num_dir_enc)
+        # h_in : (batch_size, x_seq_len, d_ctx)
         # h_in_len : (batch_size)
         # y_in : (batch_size, y_seq_len)
         batch_size, y_seq_len = y_in.size()
         x_seq_len = h_in.size()[1]
         h_in_len = h_in_len.data.view(-1)
         xmask = xlen_to_mask_rnn(h_in_len.tolist(), self.tt) # (batch_size, x_seq_len)
+
+        #import ipdb; ipdb.set_trace()
 
         s_0 = torch.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
         s_0 = torch.div( s_0, Variable(self.tt.FloatTensor(h_in_len.tolist()).view(-1,1)) )
@@ -157,9 +159,10 @@ class Decoder(nn.Module):
         y_in_emb = self.drop(y_in_emb) # (batch_size, y_seq_len, d_word_vec)
 
         h_in_big = h_in.view(-1, self.d_ctx) \
-                # (batch_size * x_seq_len, D_hid_enc * num_dir_enc) 
+                # (batch_size * x_seq_len, d_ctx) 
 
         ctx_h = self.h_to_ctx( h_in_big ).view(batch_size, x_seq_len, self.d_ctx)
+                # (batch_size, x_seq_len, d_ctx)
 
         logits = []
         for idx in range(y_seq_len):
@@ -173,7 +176,7 @@ class Decoder(nn.Module):
             # s_t (n_layers, batch_size, d_model)
             #import ipdb; ipdb.set_trace()
             ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size, -1) \
-                    # (batch_size, d_model * num_layers_dec)
+                    # (batch_size, d_model * n_layers)
 
             ctx_y = self.y_to_ctx( y_in_emb[:,idx,:] )[:,None,:] # (batch_size, 1, d_ctx)
             ctx_s = self.s_to_ctx( ctx_s_t_ )[:,None,:]
