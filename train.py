@@ -31,7 +31,7 @@ def get_loss(crit, pred, gold, opt, smoothing_eps=0.1):
     
     loss = crit(pred, gold)
 
-    if smoothing_eps:
+    if opt.smoothing and smoothing_eps:
         if opt.cuda:
             smooth = gold.ne(Constants.PAD).type(torch.cuda.FloatTensor) * torch.mean(pred, -1)
         else:
@@ -60,7 +60,8 @@ class MainModel(nn.Module):
         gold = tgt[0][:, 1:]
         
         pred = self.model(src, tgt)
-        pred = F.log_softmax(pred, dim=1)
+        if self.opt.smoothing:
+            pred = F.log_softmax(pred, dim=1)
 
         loss = get_loss(self.crit, pred, gold, self.opt)
         #g_n_correct = n_correct # hack
@@ -231,17 +232,17 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
                 pred_line = ' '.join([validation_data.tgt_idx2word[idx] for idx in idx_seq])
                 f.write(pred_line + '\n')
 
-        try:
-            #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
-            out = subprocess.check_output("perl multi-bleu.perl " + opt.valid_bleu_ref + " < " + output_name, shell=True)
-            out = out.decode() # because out is binary
-        except:
-            out = "multi-bleu.perl error"
+    try:
+        #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
+        out = subprocess.check_output("perl multi-bleu.perl " + opt.valid_bleu_ref + " < " + output_name, shell=True)
+        out = out.decode() # because out is binary
+    except:
+        out = "multi-bleu.perl error"
 
-        print(out)
-        bleu_file = os.path.dirname(model_name) + '/bleu_scores.txt'
-        with open(bleu_file, 'a') as f:
-            f.write("Epoch "+str(epoch_i)+": "+out)
+    print(out)
+    bleu_file = os.path.dirname(model_name) + '/bleu_scores.txt'
+    with open(bleu_file, 'a') as f:
+        f.write("Epoch "+str(epoch_i)+": "+out)
 
     #return model_name
 
@@ -301,6 +302,8 @@ def main():
     parser.add_argument('-dropout', type=float, default=0.5)
     parser.add_argument('-embs_share_weight', action='store_true')
     parser.add_argument('-proj_share_weight', action='store_true')
+    parser.add_argument('-smoothing', action='store_true')
+
 
     parser.add_argument('-save_model', default=None)
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='all')
@@ -424,7 +427,10 @@ def main():
         ''' With PAD token zero weight '''
         weight = torch.ones(vocab_size)
         weight[Constants.PAD] = 0
-        return nn.NLLLoss(weight, size_average=False, ignore_index=Constants.PAD)
+        if opt.smoothing:
+            return nn.NLLLoss(weight, size_average=False, ignore_index=Constants.PAD)
+        else:
+            return nn.CrossEntropyLoss(weight, size_average=False, ignore_index=Constants.PAD)
 
     crit = get_criterion(training_data.tgt_vocab_size)
 
