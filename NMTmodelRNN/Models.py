@@ -126,7 +126,9 @@ class EncoderShare(nn.Module):
         x_in_emb = self.emb(x_in) # (batch_size, x_seq_len, D_emb)
         x_in_emb = self.drop(x_in_emb)
 
-        pad_att = Variable(torch.zeros((x_in_emb.size()[0], x_in_emb.size()[1], self.d_ctx)))
+        pad_att = Variable( self.tt.FloatTensor(x_in_emb.size()[0], \
+                                                x_in_emb.size()[1], self.d_ctx).zero_() )
+
         x_in_emb = torch.cat((x_in_emb, pad_att), dim=2) 
 
         # Lengths data is wrapped inside a Variable.
