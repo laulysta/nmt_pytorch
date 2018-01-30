@@ -43,11 +43,21 @@ def get_attn_subsequent_mask(seq):
         subsequent_mask = subsequent_mask.cuda()
     return subsequent_mask
 
+def flip(x, dim):
+    xsize = x.size()
+    dim = x.dim() + dim if dim < 0 else dim
+    x = x.view(-1, *xsize[dim:])
+    x = x.view(x.size(0), x.size(1), -1)[:, getattr(torch.arange(x.size(1)-1, 
+                      -1, -1), ('cpu','cuda')[x.is_cuda])().long(), :]
+    return x.view(xsize)
+
 class Encoder(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=2,
                 d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
         super(Encoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
+        d_ctx = d_model*2
+
         self.emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
         self.rnn = nn.GRU(
                     input_size=d_word_vec,
@@ -83,6 +93,74 @@ class Encoder(nn.Module):
 
         # attentional decoder : return the entire sequence of h_n
         out, outlen = torch.nn.utils.rnn.pad_packed_sequence(top_layer, batch_first = True)
+        return out.contiguous() # (batch_size, x_seq_len, D_hid * num_dir)
+
+class EncoderShare(nn.Module):
+    def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
+                d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
+        super(Encoder_share, self).__init__()
+        self.tt = torch.cuda if cuda else torch
+        d_ctx = d_model*2
+
+        self.emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
+        self.rnn = nn.GRU(
+                    input_size=d_word_vec+d_ctx,
+                    hidden_size=d_model,
+                    num_layers=n_layers,
+                    dropout=dropout,
+                    batch_first=True,
+                    bidirectional=False)
+        self.drop = nn.Dropout(p=dropout)
+        self.n_layers = n_layers
+        self.d_model = d_model
+        self.tt = torch.cuda if cuda else torch
+        self.d_ctx = d_ctx
+
+    def forward(self, x_in, x_in_lens):
+        # x_in : (batch_size, x_seq_len)
+        # x_in_lens : (batch_size)
+        batch_size, x_seq_len = x_in.size()
+
+        h_0 = Variable( self.tt.FloatTensor(self.n_layers, \
+                                            batch_size, self.d_model).zero_() )
+        x_in_emb = self.emb(x_in) # (batch_size, x_seq_len, D_emb)
+        x_in_emb = self.drop(x_in_emb)
+
+        pad_att = Variable(torch.zeros((x_in_emb.size()[0], x_in_emb.size()[1], self.d_ctx)))
+        x_in_emb = torch.cat((x_in_emb, pad_att), dim=2) 
+
+        # Lengths data is wrapped inside a Variable.
+        x_in_lens = x_in_lens.data.view(-1).tolist()
+
+        #Create reverse seq emb
+        x_in_emb_r = torch.zeros_like(x_in_emb)
+        for ii, seq_len in enumerate(x_in_lens):
+            tmp = x_in_emb[ii,:seq_len,:]
+            x_in_emb_r[ii,:seq_len,:] = flip(tmp, 0)
+
+        pack = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb, x_in_lens, batch_first=True)
+        pack_r = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb_r, x_in_lens, batch_first=True)
+        
+        # input (batch_size, x_seq_len, D_emb)
+        # h_0 (num_layers * num_dir, batch_size, D_hid)
+        top_layer, h_n = self.rnn(pack, h_0)
+        top_layer_r, h_n_r = self.rnn(pack_r, h_0)
+        # top_layer (batch_size, x_seq_len, D_hid * num_dir)
+        # h_n (num_layers * num_dir, batch_size, D_hid)
+
+        # attentional decoder : return the entire sequence of h_n
+        out1, outlen1 = torch.nn.utils.rnn.pad_packed_sequence(top_layer, batch_first = True)
+        out_r, outlen_r = torch.nn.utils.rnn.pad_packed_sequence(top_layer_r, batch_first = True)
+
+        # Reverse back
+        out_r = out_r.contiguous()
+        out2 = torch.zeros_like(out_r)
+        for ii, seq_len in enumerate(x_in_lens):
+            tmp = out_r[ii,:seq_len,:]
+            out2[ii,:seq_len,:] = flip(tmp, 0)
+
+        out = torch.cat((out1, out2), dim=2)
+
         return out.contiguous() # (batch_size, x_seq_len, D_hid * num_dir)
 
 
@@ -292,22 +370,26 @@ class NMTmodelRNN(nn.Module):
     def __init__(
             self, n_src_vocab, n_tgt_vocab, n_max_seq, n_layers=2,
             d_word_vec=512, d_model=512,
-            dropout=0.1, proj_share_weight=True, embs_share_weight=True, cuda=False):
+            dropout=0.1, proj_share_weight=True, embs_share_weight=True, share_enc_dec=False, cuda=False):
 
         self.n_layers = n_layers
 
         super(NMTmodelRNN, self).__init__()
 
-        self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
-                                d_word_vec=d_word_vec, d_model=d_model,
-                                dropout=dropout, cuda=cuda)
-
-        #import ipdb; ipdb.set_trace()
         self.decoder = Decoder(
             n_tgt_vocab, n_max_seq, n_layers=n_layers,
             d_word_vec=d_word_vec, d_model=d_model,
             dropout=dropout, proj_share_weight = proj_share_weight, cuda=cuda)
 
+        if share_enc_dec:
+            self.encoder = EncoderShare(n_src_vocab, n_max_seq, n_layers=n_layers,
+                                    d_word_vec=d_word_vec, d_model=d_model,
+                                    dropout=dropout, cuda=cuda)
+            self.encoder.rnn = self.decoder.rnn
+        else:
+            self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
+                                    d_word_vec=d_word_vec, d_model=d_model,
+                                    dropout=dropout, cuda=cuda)
 
         if embs_share_weight:
             # Share the weight matrix between src/tgt word embeddings

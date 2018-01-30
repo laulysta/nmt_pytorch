@@ -263,6 +263,7 @@ def load_model(opt):
         d_word_vec=model_opt.d_word_vec,
         n_layers=model_opt.n_layers,
         dropout=model_opt.dropout,
+        share_enc_dec=model_opt.share_enc_dec,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -329,6 +330,8 @@ def main():
 
     parser.add_argument('-external_validation_script', type=str, default=None, metavar='PATH', nargs='*',
                          help="location of validation script (to run your favorite metric for validation) (default: %(default)s)")
+
+    parser.add_argument('-share_enc_dec', action='store_true')
 
     opt = parser.parse_args()
     if opt.save_freq_pct <= 0.0 or opt.save_freq_pct > 1.0:
@@ -403,6 +406,7 @@ def main():
             d_word_vec=opt.d_word_vec,
             n_layers=opt.n_layers,
             dropout=opt.dropout,
+            share_enc_dec=opt.share_enc_dec,
             cuda=opt.cuda)
 
 
