@@ -98,7 +98,7 @@ class Encoder(nn.Module):
 class EncoderShare(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
                 d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
-        super(Encoder_share, self).__init__()
+        super(EncoderShare, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
 
