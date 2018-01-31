@@ -188,7 +188,6 @@ class Decoder(nn.Module):
         #self.rnn = nn.GRUCell(d_ctx+d_word_vec, d_model)
         self.rnn = nn.GRU(d_ctx+d_word_vec, d_model, \
                            n_layers, dropout=dropout, batch_first=True)
-        self.emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=0)
         self.drop = nn.Dropout(p=dropout)
         self.ctx_to_s0 = nn.Linear(d_ctx, n_layers * d_model)
 
@@ -398,7 +397,7 @@ class NMTmodelRNN(nn.Module):
             # assume the src/tgt word vec size are the same
             assert n_src_vocab == n_tgt_vocab, \
             "To share word embedding table, the vocabulary size of src/tgt shall be the same."
-            self.encoder.src_word_emb.weight = self.decoder.tgt_word_emb.weight
+            self.encoder.emb.weight = self.decoder.emb.weight
 
     # def get_trainable_parameters(self):
     #     ''' Avoid updating the position encoding '''
