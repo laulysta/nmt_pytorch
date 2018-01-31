@@ -1,7 +1,7 @@
 ''' Handling the data io '''
 import argparse
 import torch
-import transformer.Constants as Constants
+import NMTmodelRNN.Constants as Constants
 import numpy as np
 
 def read_instances_from_file(inst_file, max_sent_len, keep_case):
