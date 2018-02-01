@@ -8,6 +8,7 @@ import math
 import time
 import sys, os
 import os.path
+import pathlib
 
 import numpy as np
 from subprocess import Popen
@@ -392,6 +393,10 @@ def main():
     if not opt.no_reload and os.path.isfile(opt.save_model+".chkpt"):
         modelRNN, optimizer, epoch_i = load_model(opt)
     else:
+        #Create path if needed
+        pathlib.Path(opt.save_model).parent.mkdir(parents=True, exist_ok=True)
+
+        #Create model
         epoch_i = 0.0
         modelRNN = NMTmodelRNN(
             opt.src_vocab_size,
