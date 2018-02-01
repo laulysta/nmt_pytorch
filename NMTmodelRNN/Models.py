@@ -330,7 +330,7 @@ class Decoder(nn.Module):
             c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
-            out, s_t = self.rnn( torch.cat((c_t[:,None,:], y_in_emb[:,0,:][:,None,:]), dim=2), s_tm1 )
+            out, s_t = self.rnn( torch.cat((y_in_emb[:,0,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
             ####################################################
             #s_t = self.rnn(torch.cat((c_t, y_in_emb[:,0,:]), dim=1), s_tm1[0] )
             #s_t = self.drop(s_t)
