@@ -179,7 +179,7 @@ class Decoder(nn.Module):
     # Base recurrent attention-based decoder class.
     def __init__(
              self, n_tgt_vocab, n_max_seq, n_layers=2,
-             d_word_vec=512, d_model=512, dropout=0.5, proj_share_weight=True, cuda=False):
+             d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True, cuda=False):
         super(Decoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -201,9 +201,9 @@ class Decoder(nn.Module):
         self.s_to_fin = nn.Linear(d_model, d_word_vec)
         self.fin_to_voc = nn.Linear(d_word_vec, n_tgt_vocab, bias=False)
 
-        if proj_share_weight:
+        if not no_proj_share_weight:
             # Share the weight matrix between tgt word embedding/projection
-            #assert d_model == d_word_vec
+            assert self.emb.weight.size() == self.fin_to_voc.weight.size()
             self.emb.weight = self.fin_to_voc.weight
 
         self.n_layers = n_layers
@@ -371,7 +371,7 @@ class NMTmodelRNN(nn.Module):
     def __init__(
             self, n_src_vocab, n_tgt_vocab, n_max_seq, n_layers=2,
             d_word_vec=512, d_model=512,
-            dropout=0.1, proj_share_weight=True, embs_share_weight=True, share_enc_dec=False, cuda=False):
+            dropout=0.1, no_proj_share_weight=True, embs_share_weight=True, share_enc_dec=False, cuda=False):
 
         self.n_layers = n_layers
 
@@ -380,7 +380,7 @@ class NMTmodelRNN(nn.Module):
         self.decoder = Decoder(
             n_tgt_vocab, n_max_seq, n_layers=n_layers,
             d_word_vec=d_word_vec, d_model=d_model,
-            dropout=dropout, proj_share_weight = proj_share_weight, cuda=cuda)
+            dropout=dropout, no_proj_share_weight = no_proj_share_weight, cuda=cuda)
 
         if share_enc_dec:
             self.encoder = EncoderShare(n_src_vocab, n_max_seq, n_layers=n_layers,

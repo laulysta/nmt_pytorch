@@ -249,7 +249,7 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
 
 def load_model(opt):
 
-    checkpoint = torch.load(opt.reload)
+    checkpoint = torch.load(opt.save_model+'.chkpt')
     model_opt = checkpoint['settings']
     epoch_i = checkpoint['epoch']
 
@@ -257,7 +257,7 @@ def load_model(opt):
         model_opt.src_vocab_size,
         model_opt.tgt_vocab_size,
         model_opt.max_token_seq_len,
-        proj_share_weight=model_opt.proj_share_weight,
+        no_proj_share_weight=model_opt.no_proj_share_weight,
         embs_share_weight=model_opt.embs_share_weight,
         d_model=model_opt.d_model,
         d_word_vec=model_opt.d_word_vec,
@@ -302,11 +302,11 @@ def main():
 
     parser.add_argument('-dropout', type=float, default=0.5)
     parser.add_argument('-embs_share_weight', action='store_true')
-    parser.add_argument('-proj_share_weight', action='store_true')
+    parser.add_argument('-no_proj_share_weight', action='store_true')
     parser.add_argument('-smoothing', action='store_true')
 
 
-    parser.add_argument('-save_model', default=None)
+    parser.add_argument('-save_model', required=True)
     parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='all')
     parser.add_argument('-save_freq_pct', type=float, default=1.0)
 
@@ -322,8 +322,7 @@ def main():
 
     parser.add_argument('-no_reload_optimizer', action='store_true')
 
-    parser.add_argument('-reload', type=str, default='',
-                        help='Path to model .pt file')
+    parser.add_argument('-no_reload', action='store_true')
 
     parser.add_argument('-valid_bleu_ref', type=str, default='',
                         help='Path to the reference')
@@ -390,9 +389,7 @@ def main():
 
     print(opt)
 
-    if opt.reload and os.path.isfile(opt.reload):
-        if not opt.save_model:
-            opt.save_model = opt.reload[:-6]
+    if not opt.no_reload and os.path.isfile(opt.save_model+".chkpt"):
         modelRNN, optimizer, epoch_i = load_model(opt)
     else:
         epoch_i = 0.0
@@ -400,7 +397,7 @@ def main():
             opt.src_vocab_size,
             opt.tgt_vocab_size,
             opt.max_token_seq_len,
-            proj_share_weight=opt.proj_share_weight,
+            no_proj_share_weight=opt.no_proj_share_weight,
             embs_share_weight=opt.embs_share_weight,
             d_model=opt.d_model,
             d_word_vec=opt.d_word_vec,
