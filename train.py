@@ -228,11 +228,13 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
 
             #import ipdb; ipdb.set_trace()
             for idx_seq in all_hyp:
-                if idx_seq[-1] == Constants.EOS: # if last word is EOS
-                    idx_seq = idx_seq[:-1]
-                pred_line = ' '.join([validation_data.tgt_idx2word[idx] for idx in idx_seq])
-                f.write(pred_line + '\n')
-
+                if len(idx_seq) > 0: 
+                    if idx_seq[-1] == Constants.EOS: # if last word is EOS
+                        idx_seq = idx_seq[:-1]
+                    pred_line = ' '.join([validation_data.tgt_idx2word[idx] for idx in idx_seq])
+                    f.write(pred_line + '\n')
+                else:
+                    f.write('\n')
     try:
         #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
         out = subprocess.check_output("perl multi-bleu.perl " + opt.valid_bleu_ref + " < " + output_name, shell=True)
