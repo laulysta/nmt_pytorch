@@ -95,6 +95,9 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         else:
             loss.backward()
 
+        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs/LSTMs.
+        nn.utils.clip_grad_norm(model.parameters(), 1.0)
+
         # update parameters
         optimizer.step()
         if opt.sch_optim:

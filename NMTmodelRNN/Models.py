@@ -273,10 +273,12 @@ class Decoder(nn.Module):
             fin_c = self.c_to_fin( c_t ) # (batch_size, d_word_vec)
             fin_s = self.s_to_fin( out.view(-1, self.d_model) ) # (batch_size, d_word_vec)
             fin = F.tanh( fin_y + fin_c + fin_s )
-            s_tm1 = s_t
+            fin = self.drop(fin)
 
             logit = self.fin_to_voc( fin ) # (batch_size, vocab_size)
             logits.append( logit )
+
+            s_tm1 = s_t
             # logits : list of (batch_size, vocab_size) vectors
 
         ans = torch.cat(logits, 0) # (y_seq_len * batch_size, vocab_size)
