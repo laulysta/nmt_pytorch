@@ -61,28 +61,36 @@ def norm_weight(nin, nout=None, scale=None, ortho=True):
     if nout is None:
         nout = nin
     if nout == nin and ortho:
-        W = ortho_weight(nin, rng=rng)
+        W = ortho_weight(nin)
     else:
         if scale is None:
             scale = np.sqrt(6. / (nin + nout)) 
         W = scale * (2. * rng.rand(nin, nout) - 1.)
     return W.astype('float32')
 
-def rnn_init_weights(rnn, d_model, d_word_vec):
+def rnn_init_weights(rnn, d_out, d_in):
     for ii in range(len(rnn.all_weights)):
-            # init input matrix U
-            rnn.all_weights[ii][0].data[:d_model]=torch.from_numpy(norm_weight(d_model, d_word_vec))
-            rnn.all_weights[ii][0].data[d_model:d_model*2]=torch.from_numpy(norm_weight(d_model, d_word_vec))
-            rnn.all_weights[ii][0].data[d_model*2:d_model*3]=torch.from_numpy(norm_weight(d_model, d_word_vec))
+        # init input matrix U
+        rnn.all_weights[ii][0].data[:d_out] = torch.from_numpy(norm_weight(d_out, d_in))
+        rnn.all_weights[ii][0].data[d_out:d_out*2] = torch.from_numpy(norm_weight(d_out, d_in))
+        rnn.all_weights[ii][0].data[d_out*2:d_out*3] = torch.from_numpy(norm_weight(d_out, d_in))
 
-            # init time step matrix U with orthogonal matrix
-            rnn.all_weights[ii][1].data[:d_model]=torch.from_numpy(ortho_weight(d_model))
-            rnn.all_weights[ii][1].data[d_model:d_model*2]=torch.from_numpy(ortho_weight(d_model))
-            rnn.all_weights[ii][1].data[d_model*2:d_model*3]=torch.from_numpy(ortho_weight(d_model))
+        # init time step matrix U with orthogonal matrix
+        rnn.all_weights[ii][1].data[:d_out] = torch.from_numpy(ortho_weight(d_out))
+        rnn.all_weights[ii][1].data[d_out:d_out*2] = torch.from_numpy(ortho_weight(d_out))
+        rnn.all_weights[ii][1].data[d_out*2:d_out*3] = torch.from_numpy(ortho_weight(d_out))
 
-            # init bias
-            rnn.all_weights[ii][2].data.zero_()
-            rnn.all_weights[ii][3].data.zero_()
+        # init bias
+        rnn.all_weights[ii][2].data.zero_()
+        rnn.all_weights[ii][3].data.zero_()
+
+def emb_init_weights(emb, d_voc, d_word_vec):
+    emb.weight.data[1:] = torch.from_numpy(norm_weight(d_voc-1, d_word_vec))
+
+def layer_init_weights(layer, d_out, d_in, scale=None, bias=True):
+    layer.weight.data = torch.from_numpy(norm_weight(d_in, d_out, scale))
+    if bias:
+        layer.bias.data.zero_()
 
 class Encoder(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=2,
@@ -92,6 +100,8 @@ class Encoder(nn.Module):
         d_ctx = d_model*2
 
         self.emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
+        emb_init_weights(self.emb, n_src_vocab, d_word_vec)
+
         self.rnn = nn.GRU(
                     input_size=d_word_vec,
                     hidden_size=d_model,
@@ -99,22 +109,6 @@ class Encoder(nn.Module):
                     dropout=dropout,
                     batch_first=True,
                     bidirectional=True)
-        # init rnn weights
-        # for ii in range(len(self.rnn.all_weights)):
-        #     # init input matrix U
-        #     self.rnn.all_weights[ii][0].data[:d_model]=self.tt.from_numpy(norm_weight(d_model, d_word_vec))
-        #     self.rnn.all_weights[ii][0].data[d_model:d_model*2]=self.tt.from_numpy(norm_weight(d_model, d_word_vec))
-        #     self.rnn.all_weights[ii][0].data[d_model*2:d_model*3]=self.tt.from_numpy(norm_weight(d_model, d_word_vec))
-
-        #     # init time step matrix U with orthogonal matrix
-        #     self.rnn.all_weights[ii][1].data[:d_model]=self.tt.from_numpy(ortho_weight(d_model))
-        #     self.rnn.all_weights[ii][1].data[d_model:d_model*2]=self.tt.from_numpy(ortho_weight(d_model))
-        #     self.rnn.all_weights[ii][1].data[d_model*2:d_model*3]=self.tt.from_numpy(ortho_weight(d_model))
-
-        #     # init bias
-        #     self.rnn.all_weights[ii][2].data.zero_()
-        #     self.rnn.all_weights[ii][3].data.zero_()
-        #import ipdb; ipdb.set_trace()
         rnn_init_weights(self.rnn, d_model, d_word_vec)
 
         self.drop = nn.Dropout(p=dropout)
@@ -154,6 +148,8 @@ class EncoderShare(nn.Module):
         d_ctx = d_model*2
 
         self.emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
+        emb_init_weights(self.emb, n_src_vocab, d_word_vec)
+
         self.rnn = nn.GRU(
                     input_size=d_word_vec+d_ctx,
                     hidden_size=d_model,
@@ -238,23 +234,35 @@ class Decoder(nn.Module):
         d_ctx = d_model*2
 
         self.emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=0)
+        emb_init_weights(self.emb, n_tgt_vocab, d_word_vec)
         #self.rnn = nn.GRUCell(d_ctx+d_word_vec, d_model)
         self.rnn = nn.GRU(d_word_vec+d_ctx, d_model, \
                            n_layers, dropout=dropout, batch_first=True)
         rnn_init_weights(self.rnn, d_model, d_word_vec+d_ctx)
 
         self.drop = nn.Dropout(p=dropout)
+        #import ipdb; ipdb.set_trace()
         self.ctx_to_s0 = nn.Linear(d_ctx, n_layers * d_model)
+        layer_init_weights(self.ctx_to_s0, d_ctx, n_layers * d_model)
 
         self.y_to_ctx = nn.Linear(d_word_vec, d_ctx)
-        self.s_to_ctx = nn.Linear(d_model * n_layers, d_ctx)
-        self.h_to_ctx = nn.Linear(d_ctx, d_ctx)
+        layer_init_weights(self.y_to_ctx, d_word_vec, d_ctx)
+        self.s_to_ctx = nn.Linear(d_model * n_layers, d_ctx, bias=False)
+        layer_init_weights(self.s_to_ctx, d_model * n_layers, d_ctx, bias=False)
+        self.h_to_ctx = nn.Linear(d_ctx, d_ctx, bias=False)
+        layer_init_weights(self.h_to_ctx, d_ctx, d_ctx, bias=False)
         self.ctx_to_score = nn.Linear(d_ctx, 1)
+        layer_init_weights(self.ctx_to_score, d_ctx, 1)
 
         self.y_to_fin = nn.Linear(d_word_vec, d_word_vec)
-        self.c_to_fin = nn.Linear(d_ctx, d_word_vec)
-        self.s_to_fin = nn.Linear(d_model, d_word_vec)
-        self.fin_to_voc = nn.Linear(d_word_vec, n_tgt_vocab, bias=False)
+        layer_init_weights(self.y_to_fin, d_word_vec, d_word_vec)
+        self.c_to_fin = nn.Linear(d_ctx, d_word_vec, bias=False)
+        layer_init_weights(self.c_to_fin, d_ctx, d_word_vec, bias=False)
+        self.s_to_fin = nn.Linear(d_model, d_word_vec, bias=False)
+        layer_init_weights(self.s_to_fin, d_model, d_word_vec, bias=False)
+        #import ipdb; ipdb.set_trace()
+        self.fin_to_voc = nn.Linear(d_word_vec, n_tgt_vocab)
+        layer_init_weights(self.fin_to_voc, d_word_vec, n_tgt_vocab, scale=0.5)
 
         if not no_proj_share_weight:
             # Share the weight matrix between tgt word embedding/projection
