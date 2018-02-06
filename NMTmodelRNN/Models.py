@@ -68,17 +68,17 @@ def norm_weight(nin, nout=None, scale=None, ortho=True):
         W = scale * (2. * rng.rand(nin, nout) - 1.)
     return W.astype('float32')
 
-def rnn_init_weights(rnn, tt, d_model, d_word_vec):
+def rnn_init_weights(rnn, d_model, d_word_vec):
     for ii in range(len(rnn.all_weights)):
             # init input matrix U
-            rnn.all_weights[ii][0].data[:d_model]=tt.from_numpy(norm_weight(d_model, d_word_vec))
-            rnn.all_weights[ii][0].data[d_model:d_model*2]=tt.from_numpy(norm_weight(d_model, d_word_vec))
-            rnn.all_weights[ii][0].data[d_model*2:d_model*3]=tt.from_numpy(norm_weight(d_model, d_word_vec))
+            rnn.all_weights[ii][0].data[:d_model]=torch.from_numpy(norm_weight(d_model, d_word_vec))
+            rnn.all_weights[ii][0].data[d_model:d_model*2]=torch.from_numpy(norm_weight(d_model, d_word_vec))
+            rnn.all_weights[ii][0].data[d_model*2:d_model*3]=torch.from_numpy(norm_weight(d_model, d_word_vec))
 
             # init time step matrix U with orthogonal matrix
-            rnn.all_weights[ii][1].data[:d_model]=tt.from_numpy(ortho_weight(d_model))
-            rnn.all_weights[ii][1].data[d_model:d_model*2]=tt.from_numpy(ortho_weight(d_model))
-            rnn.all_weights[ii][1].data[d_model*2:d_model*3]=tt.from_numpy(ortho_weight(d_model))
+            rnn.all_weights[ii][1].data[:d_model]=torch.from_numpy(ortho_weight(d_model))
+            rnn.all_weights[ii][1].data[d_model:d_model*2]=torch.from_numpy(ortho_weight(d_model))
+            rnn.all_weights[ii][1].data[d_model*2:d_model*3]=torch.from_numpy(ortho_weight(d_model))
 
             # init bias
             rnn.all_weights[ii][2].data.zero_()
@@ -115,7 +115,7 @@ class Encoder(nn.Module):
         #     self.rnn.all_weights[ii][2].data.zero_()
         #     self.rnn.all_weights[ii][3].data.zero_()
         #import ipdb; ipdb.set_trace()
-        rnn_init_weights(self.rnn, self.tt, d_model, d_word_vec)
+        rnn_init_weights(self.rnn, d_model, d_word_vec)
 
         self.drop = nn.Dropout(p=dropout)
         self.n_layers = n_layers
@@ -161,7 +161,7 @@ class EncoderShare(nn.Module):
                     dropout=dropout,
                     batch_first=True,
                     bidirectional=False)
-        rnn_init_weights(self.rnn, self.tt, d_model, d_word_vec+d_ctx)
+        rnn_init_weights(self.rnn, d_model, d_word_vec+d_ctx)
 
         self.drop = nn.Dropout(p=dropout)
         self.n_layers = n_layers
@@ -241,7 +241,7 @@ class Decoder(nn.Module):
         #self.rnn = nn.GRUCell(d_ctx+d_word_vec, d_model)
         self.rnn = nn.GRU(d_word_vec+d_ctx, d_model, \
                            n_layers, dropout=dropout, batch_first=True)
-        rnn_init_weights(self.rnn, self.tt, d_model, d_word_vec+d_ctx)
+        rnn_init_weights(self.rnn, d_model, d_word_vec+d_ctx)
 
         self.drop = nn.Dropout(p=dropout)
         self.ctx_to_s0 = nn.Linear(d_ctx, n_layers * d_model)
