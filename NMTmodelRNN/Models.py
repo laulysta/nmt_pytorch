@@ -51,6 +51,39 @@ def flip(x, dim):
                       -1, -1), ('cpu','cuda')[x.is_cuda])().long(), :]
     return x.view(xsize)
 
+def ortho_weight(ndim):
+    W = np.random.randn(ndim, ndim)
+    u, s, v = np.linalg.svd(W)
+    return u.astype('float32')
+
+def norm_weight(nin, nout=None, scale=None, ortho=True):
+    rng = np.random.RandomState(1234)
+    if nout is None:
+        nout = nin
+    if nout == nin and ortho:
+        W = ortho_weight(nin, rng=rng)
+    else:
+        if scale is None:
+            scale = np.sqrt(6. / (nin + nout)) 
+        W = scale * (2. * rng.rand(nin, nout) - 1.)
+    return W.astype('float32')
+
+def rnn_init_weights(rnn, tt, d_model, d_word_vec):
+    for ii in range(len(rnn.all_weights)):
+            # init input matrix U
+            rnn.all_weights[ii][0].data[:d_model]=tt.from_numpy(norm_weight(d_model, d_word_vec))
+            rnn.all_weights[ii][0].data[d_model:d_model*2]=tt.from_numpy(norm_weight(d_model, d_word_vec))
+            rnn.all_weights[ii][0].data[d_model*2:d_model*3]=tt.from_numpy(norm_weight(d_model, d_word_vec))
+
+            # init time step matrix U with orthogonal matrix
+            rnn.all_weights[ii][1].data[:d_model]=tt.from_numpy(ortho_weight(d_model))
+            rnn.all_weights[ii][1].data[d_model:d_model*2]=tt.from_numpy(ortho_weight(d_model))
+            rnn.all_weights[ii][1].data[d_model*2:d_model*3]=tt.from_numpy(ortho_weight(d_model))
+
+            # init bias
+            rnn.all_weights[ii][2].data.zero_()
+            rnn.all_weights[ii][3].data.zero_()
+
 class Encoder(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=2,
                 d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
@@ -66,6 +99,24 @@ class Encoder(nn.Module):
                     dropout=dropout,
                     batch_first=True,
                     bidirectional=True)
+        # init rnn weights
+        # for ii in range(len(self.rnn.all_weights)):
+        #     # init input matrix U
+        #     self.rnn.all_weights[ii][0].data[:d_model]=self.tt.from_numpy(norm_weight(d_model, d_word_vec))
+        #     self.rnn.all_weights[ii][0].data[d_model:d_model*2]=self.tt.from_numpy(norm_weight(d_model, d_word_vec))
+        #     self.rnn.all_weights[ii][0].data[d_model*2:d_model*3]=self.tt.from_numpy(norm_weight(d_model, d_word_vec))
+
+        #     # init time step matrix U with orthogonal matrix
+        #     self.rnn.all_weights[ii][1].data[:d_model]=self.tt.from_numpy(ortho_weight(d_model))
+        #     self.rnn.all_weights[ii][1].data[d_model:d_model*2]=self.tt.from_numpy(ortho_weight(d_model))
+        #     self.rnn.all_weights[ii][1].data[d_model*2:d_model*3]=self.tt.from_numpy(ortho_weight(d_model))
+
+        #     # init bias
+        #     self.rnn.all_weights[ii][2].data.zero_()
+        #     self.rnn.all_weights[ii][3].data.zero_()
+        #import ipdb; ipdb.set_trace()
+        rnn_init_weights(self.rnn, self.tt, d_model, d_word_vec)
+
         self.drop = nn.Dropout(p=dropout)
         self.n_layers = n_layers
         self.d_model = d_model
@@ -110,6 +161,8 @@ class EncoderShare(nn.Module):
                     dropout=dropout,
                     batch_first=True,
                     bidirectional=False)
+        rnn_init_weights(self.rnn, self.tt, d_model, d_word_vec+d_ctx)
+
         self.drop = nn.Dropout(p=dropout)
         self.n_layers = n_layers
         self.d_model = d_model
@@ -186,8 +239,10 @@ class Decoder(nn.Module):
 
         self.emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=0)
         #self.rnn = nn.GRUCell(d_ctx+d_word_vec, d_model)
-        self.rnn = nn.GRU(d_ctx+d_word_vec, d_model, \
+        self.rnn = nn.GRU(d_word_vec+d_ctx, d_model, \
                            n_layers, dropout=dropout, batch_first=True)
+        rnn_init_weights(self.rnn, self.tt, d_model, d_word_vec+d_ctx)
+
         self.drop = nn.Dropout(p=dropout)
         self.ctx_to_s0 = nn.Linear(d_ctx, n_layers * d_model)
 
@@ -227,6 +282,7 @@ class Decoder(nn.Module):
         s_0 = torch.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
         s_0 = torch.div( s_0, Variable(self.tt.FloatTensor(h_in_len.tolist()).view(-1,1)) )
         s_0 = self.ctx_to_s0(s_0)
+        s_0 = F.tanh(s_0)
         s_tm1 = s_0 # (batch_size, n_layers * d_model)
         s_tm1 = s_tm1.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
                 # (n_layers, batch_size, d_model)
