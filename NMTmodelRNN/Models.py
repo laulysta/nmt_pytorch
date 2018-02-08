@@ -359,7 +359,8 @@ class Decoder(nn.Module):
 
         s_tm1 = torch.sum(h_in, 1) # (batch_size, d_ctx)
         s_tm1 = torch.div( s_tm1, Variable(self.tt.FloatTensor(h_in_len).view(batch_size, 1)) )
-        s_tm1= self.ctx_to_s0(s_tm1)
+        s_tm1 = self.ctx_to_s0(s_tm1)
+        s_tm1 = F.tanh(s_tm1)
         s_tm1 = s_tm1.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
                 # (n_layers, batch_size, d_model)
 
