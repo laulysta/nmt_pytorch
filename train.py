@@ -248,8 +248,8 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
     print(out)
     bleu_file = os.path.dirname(model_name) + '/bleu_scores.txt'
     with open(bleu_file, 'a') as f:
-        f.write("Epoch "+str(epoch_i)+": "+out)
-
+        #f.write("Epoch "+str(epoch_i)+": "+out)
+        f.write("Epoch{epoch:3.2f} : {out}".format(epoch=epoch_i, out=out))
     #return model_name
 
 
