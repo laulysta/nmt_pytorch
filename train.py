@@ -338,6 +338,8 @@ def main():
 
     parser.add_argument('-share_enc_dec', action='store_true')
 
+    parser.add_argument('-target_lang', action='store_true')
+
     opt = parser.parse_args()
     if opt.save_freq_pct <= 0.0 or opt.save_freq_pct > 1.0:
         raise argparse.ArgumentTypeError("-save_freq_pct: %r not in range [0.0, 1.0]"%(opt.save_freq_pct,))
