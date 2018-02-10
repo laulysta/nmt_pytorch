@@ -261,8 +261,12 @@ class Decoder(nn.Module):
         self.s_to_fin = nn.Linear(d_model, d_word_vec, bias=False)
         layer_init_weights(self.s_to_fin, d_model, d_word_vec, bias=False)
         #import ipdb; ipdb.set_trace()
-        self.fin_to_voc = nn.Linear(d_word_vec, n_tgt_vocab)
-        layer_init_weights(self.fin_to_voc, d_word_vec, n_tgt_vocab, scale=0.5)
+        if no_proj_share_weight:
+            self.fin_to_voc = nn.Linear(d_word_vec, n_tgt_vocab)
+            layer_init_weights(self.fin_to_voc, d_word_vec, n_tgt_vocab, scale=0.5)
+        else:
+            self.fin_to_voc = nn.Linear(d_word_vec, n_tgt_vocab, bias=False)
+            layer_init_weights(self.fin_to_voc, d_word_vec, n_tgt_vocab, scale=0.5, bias=False)
 
         if not no_proj_share_weight:
             # Share the weight matrix between tgt word embedding/projection
