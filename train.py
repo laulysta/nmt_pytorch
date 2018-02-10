@@ -57,10 +57,14 @@ class MainModel(nn.Module):
         self.crit = crit
         self.opt = opt
 
-    def forward(self, src, tgt):
+    def forward(self, src, tgt, tgt_lang=None):
         gold = tgt[0][:, 1:]
         
-        pred = self.model(src, tgt)
+        if tgt_lang:
+            pred = self.model(src, tgt, tgt_lang)
+        else:
+            pred = self.model(src, tgt)
+
         if self.opt.smoothing:
             pred = F.log_softmax(pred, dim=1)
 
@@ -84,11 +88,17 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
             desc='  - (Training)   ', leave=False):
 
         # prepare data
-        src, tgt = batch
+        if opt.target_lang:
+            src, tgt, tgt_lang = batch
+        else:
+            src, tgt = batch
 
         # forward
         optimizer.zero_grad()
-        loss, pred = model(src, tgt)
+        if opt.target_lang:
+            loss, pred = model(src, tgt, tgt_lang)
+        else:
+            loss, pred = model(src, tgt)
 
         if opt.multi_gpu:
             loss.backward(torch.ones_like(loss.data))
@@ -135,11 +145,17 @@ def eval_epoch(model, validation_data, crit, opt):
             desc='  - (Validation) ', leave=False):
 
         # prepare data
-        src, tgt = batch
+        if opt.target_lang:
+            src, tgt, tgt_lang = batch
+        else:
+            src, tgt = batch
         gold = tgt[0][:, 1:]
 
         # forward
-        loss, pred = model(src, tgt)
+        if opt.target_lang:
+            loss, pred = model(src, tgt, tgt_lang)
+        else:
+            loss, pred = model(src, tgt)
 
         # note keeping
         n_correct = get_performance(pred, gold)
@@ -216,12 +232,19 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
     with open(output_name, 'w') as f:
         for batch in tqdm(validation_data_translate, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
             #import ipdb; ipdb.set_trace()
-            src_seq, src_pos = batch
+            if opt.target_lang:
+                (src_seq, src_pos), (tgt_lang_seq, tgt_lang_pos) = batch
+            else:
+                src_seq, src_pos  = batch
+            
             lengths_seq_src, idx_src = src_pos.max(1)
 
             _, sent_sort_idx = lengths_seq_src.sort(descending=True)
 
-            enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
+            if opt.target_lang:
+                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+            else:
+                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
             all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
 
             _, sent_revert_idx = sent_sort_idx.sort()
@@ -356,7 +379,7 @@ def main():
         data['dict']['tgt'],
         src_insts=data['train']['src'],
         tgt_insts=data['train']['tgt'],
-        ctx_insts=None,
+        tgt_lang_insts=(data['train']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.batch_size,
         cuda=opt.cuda,
         is_train=True,
@@ -367,7 +390,7 @@ def main():
         data['dict']['tgt'],
         src_insts=data['valid']['src'],
         tgt_insts=data['valid']['tgt'],
-        ctx_insts=None,
+        tgt_lang_insts=(data['valid']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.batch_size,
         shuffle=False,
         cuda=opt.cuda,
@@ -379,7 +402,7 @@ def main():
         data['dict']['tgt'],
         src_insts=data['valid']['src'],
         tgt_insts=None,
-        ctx_insts=None,
+        tgt_lang_insts=(data['valid']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.batch_size,
         shuffle=False,
         cuda=opt.cuda,

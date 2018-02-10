@@ -92,7 +92,7 @@ def layer_init_weights(layer, d_out, d_in, scale=None, bias=True):
     if bias:
         layer.bias.data.zero_()
 
-class Encoder(nn.Module):
+class EncoderFast(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=2,
                 d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
         super(Encoder, self).__init__()
@@ -116,7 +116,7 @@ class Encoder(nn.Module):
         self.d_model = d_model
         self.tt = torch.cuda if cuda else torch
 
-    def forward(self, x_in, x_in_lens):
+    def forward(self, x_in, x_in_lens, l_in=None):
         # x_in : (batch_size, x_seq_len)
         # x_in_lens : (batch_size)
         batch_size, x_seq_len = x_in.size()
@@ -140,45 +140,51 @@ class Encoder(nn.Module):
         out, outlen = torch.nn.utils.rnn.pad_packed_sequence(top_layer, batch_first = True)
         return out.contiguous() # (batch_size, x_seq_len, D_hid * num_dir)
 
-class EncoderShare(nn.Module):
+class Encoder(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
-                d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
-        super(EncoderShare, self).__init__()
+                d_word_vec=512, d_model=512, dropout=0.5, share_enc_dec=False, cuda=False):
+        super(Encoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
 
         self.emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
         emb_init_weights(self.emb, n_src_vocab, d_word_vec)
 
-        self.rnn = nn.GRU(
-                    input_size=d_word_vec+d_ctx,
-                    hidden_size=d_model,
-                    num_layers=n_layers,
-                    dropout=dropout,
-                    batch_first=True,
-                    bidirectional=False)
-        rnn_init_weights(self.rnn, d_model, d_word_vec+d_ctx)
+        if share_enc_dec:
+            self.rnn = None
+        else:
+            self.rnn = nn.GRU(
+                        input_size=d_word_vec,
+                        hidden_size=d_model,
+                        num_layers=n_layers,
+                        dropout=dropout,
+                        batch_first=True,
+                        bidirectional=False)
+            rnn_init_weights(self.rnn, d_model, d_word_vec)
 
+        self.share_enc_dec=share_enc_dec
         self.drop = nn.Dropout(p=dropout)
         self.n_layers = n_layers
         self.d_model = d_model
         self.tt = torch.cuda if cuda else torch
         self.d_ctx = d_ctx
 
-    def forward(self, x_in, x_in_lens):
+    def forward(self, x_in, x_in_lens, l_in=None):
         # x_in : (batch_size, x_seq_len)
         # x_in_lens : (batch_size)
         batch_size, x_seq_len = x_in.size()
 
         h_0 = Variable( self.tt.FloatTensor(self.n_layers, \
                                             batch_size, self.d_model).zero_() )
+        
         x_in_emb = self.emb(x_in) # (batch_size, x_seq_len, D_emb)
         x_in_emb = self.drop(x_in_emb)
 
-        pad_att = Variable( self.tt.FloatTensor(x_in_emb.size()[0], \
-                                                x_in_emb.size()[1], self.d_ctx).zero_() )
+        if self.share_enc_dec:
+            pad_att = Variable( self.tt.FloatTensor(x_in_emb.size()[0], \
+                                                    x_in_emb.size()[1], self.d_ctx).zero_() )
 
-        x_in_emb = torch.cat((x_in_emb, pad_att), dim=2) 
+            x_in_emb = torch.cat((x_in_emb, pad_att), dim=2) 
 
         # Lengths data is wrapped inside a Variable.
         x_in_lens = x_in_lens.data.view(-1).tolist()
@@ -188,6 +194,18 @@ class EncoderShare(nn.Module):
         for ii, seq_len in enumerate(x_in_lens):
             tmp = x_in_emb[ii,:seq_len,:]
             x_in_emb_r[ii,:seq_len,:] = flip(tmp, 0)
+
+        # Add tgt_lang rep
+        if l_in is not None:
+            l_in_emb = self.emb(l_in)
+            if self.share_enc_dec:
+                pad_att = Variable( self.tt.FloatTensor(l_in_emb.size()[0], \
+                                                        l_in_emb.size()[1], self.d_ctx).zero_() )
+                l_in_emb = torch.cat((l_in_emb, pad_att), dim=2)
+
+            x_in_emb = torch.cat((l_in_emb, x_in_emb), dim=1) # (batch_size, x_seq_len+1, D_emb)
+            x_in_emb_r = torch.cat((l_in_emb, x_in_emb_r), dim=1) # (batch_size, x_seq_len+1, D_emb)
+            x_in_lens = [x+1 for x in x_in_lens]
 
         pack = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb, x_in_lens, batch_first=True)
         pack_r = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb_r, x_in_lens, batch_first=True)
@@ -202,6 +220,12 @@ class EncoderShare(nn.Module):
         # attentional decoder : return the entire sequence of h_n
         out1, outlen1 = torch.nn.utils.rnn.pad_packed_sequence(top_layer, batch_first = True)
         out_r, outlen_r = torch.nn.utils.rnn.pad_packed_sequence(top_layer_r, batch_first = True)
+
+        # Remove tgt_lang rep
+        if l_in is not None:
+            out1 = out1[:,1:]
+            out_r = out_r[:,1:]
+            x_in_lens = [x-1 for x in x_in_lens]
 
         # Reverse back
         out_r = out_r.contiguous()
@@ -441,8 +465,9 @@ class NMTmodelRNN(nn.Module):
 
     def __init__(
             self, n_src_vocab, n_tgt_vocab, n_max_seq, n_layers=2,
-            d_word_vec=512, d_model=512,
-            dropout=0.1, no_proj_share_weight=True, embs_share_weight=True, share_enc_dec=False, cuda=False):
+            d_word_vec=512, d_model=512, dropout=0.1,
+            no_proj_share_weight=True, embs_share_weight=True,
+            share_enc_dec=False, cuda=False):
 
         self.n_layers = n_layers
 
@@ -454,9 +479,9 @@ class NMTmodelRNN(nn.Module):
             dropout=dropout, no_proj_share_weight = no_proj_share_weight, cuda=cuda)
 
         if share_enc_dec:
-            self.encoder = EncoderShare(n_src_vocab, n_max_seq, n_layers=n_layers,
+            self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
                                     d_word_vec=d_word_vec, d_model=d_model,
-                                    dropout=dropout, cuda=cuda)
+                                    dropout=dropout, share_enc_dec=share_enc_dec, cuda=cuda)
             self.encoder.rnn = self.decoder.rnn
         else:
             self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
@@ -481,10 +506,12 @@ class NMTmodelRNN(nn.Module):
     #         freezed_param_ids = enc_freezed_param_ids | dec_freezed_param_ids
     #     return (p for p in self.parameters() if id(p) not in freezed_param_ids)
 
-    def forward(self, src, tgt):
+    def forward(self, src, tgt, tgt_lang=None):
         # src_seq and src_pos: sent_len * batch_size
         src_seq, src_pos = src
         tgt_seq, tgt_pos = tgt
+        if tgt_lang is not None:
+            tgt_lang_seq, tgt_lang_pos = tgt_lang
 
         tgt_seq = tgt_seq[:, :-1]
         tgt_pos = tgt_pos[:, :-1]
@@ -492,7 +519,10 @@ class NMTmodelRNN(nn.Module):
         lengths_seq_src, idx_src = src_pos.max(1)
         #lengths_seq_tgt, idx_tgt = tgt_pos.max(1)
 
-        enc_output = self.encoder(src_seq, lengths_seq_src)
+        if tgt_lang is not None:
+            enc_output = self.encoder(src_seq, lengths_seq_src, tgt_lang_seq)
+        else:
+            enc_output = self.encoder(src_seq, lengths_seq_src)
         
         dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq)
 
