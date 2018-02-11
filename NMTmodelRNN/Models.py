@@ -151,16 +151,26 @@ class Encoder(nn.Module):
         emb_init_weights(self.emb, n_src_vocab, d_word_vec)
 
         if share_enc_dec:
-            self.rnn = None
+            self.rnn1 = None
+            self.rnn2 = None
         else:
-            self.rnn = nn.GRU(
+            self.rnn1 = nn.GRU(
                         input_size=d_word_vec,
                         hidden_size=d_model,
                         num_layers=n_layers,
                         dropout=dropout,
                         batch_first=True,
                         bidirectional=False)
-            rnn_init_weights(self.rnn, d_model, d_word_vec)
+            rnn_init_weights(self.rnn1, d_model, d_word_vec)
+
+            self.rnn2 = nn.GRU(
+                        input_size=d_word_vec,
+                        hidden_size=d_model,
+                        num_layers=n_layers,
+                        dropout=dropout,
+                        batch_first=True,
+                        bidirectional=False)
+            rnn_init_weights(self.rnn2, d_model, d_word_vec)
 
         self.share_enc_dec=share_enc_dec
         self.drop = nn.Dropout(p=dropout)
@@ -212,8 +222,8 @@ class Encoder(nn.Module):
         
         # input (batch_size, x_seq_len, D_emb)
         # h_0 (num_layers * num_dir, batch_size, D_hid)
-        top_layer, h_n = self.rnn(pack, h_0)
-        top_layer_r, h_n_r = self.rnn(pack_r, h_0)
+        top_layer, h_n = self.rnn1(pack, h_0)
+        top_layer_r, h_n_r = self.rnn2(pack_r, h_0)
         # top_layer (batch_size, x_seq_len, D_hid * num_dir)
         # h_n (num_layers * num_dir, batch_size, D_hid)
 
@@ -482,7 +492,8 @@ class NMTmodelRNN(nn.Module):
             self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
                                     d_word_vec=d_word_vec, d_model=d_model,
                                     dropout=dropout, share_enc_dec=share_enc_dec, cuda=cuda)
-            self.encoder.rnn = self.decoder.rnn
+            self.encoder.rnn1 = self.decoder.rnn
+            self.encoder.rnn2 = self.decoder.rnn
         else:
             self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
                                     d_word_vec=d_word_vec, d_model=d_model,
