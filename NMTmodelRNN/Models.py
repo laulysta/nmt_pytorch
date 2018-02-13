@@ -3,6 +3,9 @@ import torch
 import torch.nn as nn
 import numpy as np
 import NMTmodelRNN.Constants as Constants
+from NMTmodelRNN.Modules import GRU as myGRU
+from NMTmodelRNN.Modules import ortho_weight
+from NMTmodelRNN.Modules import norm_weight
 import torch.nn.init as init
 from torch.autograd import Variable
 import torch.nn.functional as F
@@ -50,23 +53,6 @@ def flip(x, dim):
     x = x.view(x.size(0), x.size(1), -1)[:, getattr(torch.arange(x.size(1)-1, 
                       -1, -1), ('cpu','cuda')[x.is_cuda])().long(), :]
     return x.view(xsize)
-
-def ortho_weight(ndim):
-    W = np.random.randn(ndim, ndim)
-    u, s, v = np.linalg.svd(W)
-    return u.astype('float32')
-
-def norm_weight(nin, nout=None, scale=None, ortho=True):
-    rng = np.random.RandomState(1234)
-    if nout is None:
-        nout = nin
-    if nout == nin and ortho:
-        W = ortho_weight(nin)
-    else:
-        if scale is None:
-            scale = np.sqrt(6. / (nin + nout)) 
-        W = scale * (2. * rng.rand(nin, nout) - 1.)
-    return W.astype('float32')
 
 def rnn_init_weights(rnn, d_out, d_in):
     for ii in range(len(rnn.all_weights)):
@@ -154,23 +140,29 @@ class Encoder(nn.Module):
             self.rnn1 = None
             self.rnn2 = None
         else:
-            self.rnn1 = nn.GRU(
-                        input_size=d_word_vec,
-                        hidden_size=d_model,
-                        num_layers=n_layers,
-                        dropout=dropout,
-                        batch_first=True,
-                        bidirectional=False)
-            rnn_init_weights(self.rnn1, d_model, d_word_vec)
+            # self.rnn1 = nn.GRU(
+            #             input_size=d_word_vec,
+            #             hidden_size=d_model,
+            #             num_layers=n_layers,
+            #             dropout=dropout,
+            #             batch_first=True,
+            #             bidirectional=False)
+            # rnn_init_weights(self.rnn1, d_model, d_word_vec)
 
-            self.rnn2 = nn.GRU(
-                        input_size=d_word_vec,
-                        hidden_size=d_model,
-                        num_layers=n_layers,
-                        dropout=dropout,
-                        batch_first=True,
-                        bidirectional=False)
-            rnn_init_weights(self.rnn2, d_model, d_word_vec)
+            # self.rnn2 = nn.GRU(
+            #             input_size=d_word_vec,
+            #             hidden_size=d_model,
+            #             num_layers=n_layers,
+            #             dropout=dropout,
+            #             batch_first=True,
+            #             bidirectional=False)
+            # rnn_init_weights(self.rnn2, d_model, d_word_vec)
+            self.rnn1 = myGRU(input_size=d_word_vec,
+                            hidden_size=d_model,
+                            batch_first=True)
+            self.rnn2 = myGRU(input_size=d_word_vec,
+                            hidden_size=d_model,
+                            batch_first=True)
 
         self.share_enc_dec=share_enc_dec
         self.drop = nn.Dropout(p=dropout)
@@ -186,6 +178,7 @@ class Encoder(nn.Module):
 
         h_0 = Variable( self.tt.FloatTensor(self.n_layers, \
                                             batch_size, self.d_model).zero_() )
+        #h_0 = Variable( self.tt.FloatTensor(batch_size, self.d_model).zero_() )
         
         x_in_emb = self.emb(x_in) # (batch_size, x_seq_len, D_emb)
         x_in_emb = self.drop(x_in_emb)
@@ -217,19 +210,23 @@ class Encoder(nn.Module):
             x_in_emb_r = torch.cat((l_in_emb, x_in_emb_r), dim=1) # (batch_size, x_seq_len+1, D_emb)
             x_in_lens = [x+1 for x in x_in_lens]
 
-        pack = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb, x_in_lens, batch_first=True)
-        pack_r = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb_r, x_in_lens, batch_first=True)
+        #pack = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb, x_in_lens, batch_first=True)
+        #pack_r = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb_r, x_in_lens, batch_first=True)
         
         # input (batch_size, x_seq_len, D_emb)
         # h_0 (num_layers * num_dir, batch_size, D_hid)
-        top_layer, h_n = self.rnn1(pack, h_0)
-        top_layer_r, h_n_r = self.rnn2(pack_r, h_0)
+        #top_layer, h_n = self.rnn1(pack, h_0)
+        #top_layer_r, h_n_r = self.rnn2(pack_r, h_0)
+        #import ipdb; ipdb.set_trace()
+        out1, h_n = self.rnn1(x_in_emb, h_0, x_in_lens)
+        out_r, h_n_r = self.rnn2(x_in_emb_r, h_0, x_in_lens)
+
         # top_layer (batch_size, x_seq_len, D_hid * num_dir)
         # h_n (num_layers * num_dir, batch_size, D_hid)
 
         # attentional decoder : return the entire sequence of h_n
-        out1, outlen1 = torch.nn.utils.rnn.pad_packed_sequence(top_layer, batch_first = True)
-        out_r, outlen_r = torch.nn.utils.rnn.pad_packed_sequence(top_layer_r, batch_first = True)
+        #out1, outlen1 = torch.nn.utils.rnn.pad_packed_sequence(top_layer, batch_first = True)
+        #out_r, outlen_r = torch.nn.utils.rnn.pad_packed_sequence(top_layer_r, batch_first = True)
 
         # Remove tgt_lang rep
         if l_in is not None:
@@ -270,9 +267,12 @@ class Decoder(nn.Module):
         self.emb = nn.Embedding(n_tgt_vocab, d_word_vec, padding_idx=0)
         emb_init_weights(self.emb, n_tgt_vocab, d_word_vec)
         #self.rnn = nn.GRUCell(d_ctx+d_word_vec, d_model)
-        self.rnn = nn.GRU(d_word_vec+d_ctx, d_model, \
-                           n_layers, dropout=dropout, batch_first=True)
-        rnn_init_weights(self.rnn, d_model, d_word_vec+d_ctx)
+        # self.rnn = nn.GRU(d_word_vec+d_ctx, d_model, \
+        #                    n_layers, dropout=dropout, batch_first=True)
+        # rnn_init_weights(self.rnn, d_model, d_word_vec+d_ctx)
+        self.rnn = myGRU(input_size=d_word_vec+d_ctx,
+                        hidden_size=d_model,
+                        batch_first=True)
 
         self.drop = nn.Dropout(p=dropout)
         #import ipdb; ipdb.set_trace()
@@ -361,6 +361,7 @@ class Decoder(nn.Module):
             c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
+            #import ipdb; ipdb.set_trace()
             out, s_t = self.rnn( torch.cat((y_in_emb[:,idx,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
             ####################################################
             #s_t = self.rnn( torch.cat((c_t, y_in_emb[:,idx,:]), dim=1), s_tm1[0] )
