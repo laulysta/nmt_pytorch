@@ -57,7 +57,7 @@ def ortho_weight(ndim):
     return u.astype('float32')
 
 def norm_weight(nin, nout=None, scale=None, ortho=True):
-    rng = np.random.RandomState(1234)
+    #rng = np.random.RandomState(1234)
     if nout is None:
         nout = nin
     if nout == nin and ortho:
@@ -65,7 +65,7 @@ def norm_weight(nin, nout=None, scale=None, ortho=True):
     else:
         if scale is None:
             scale = np.sqrt(6. / (nin + nout)) 
-        W = scale * (2. * rng.rand(nin, nout) - 1.)
+        W = scale * (2. * np.random.randn(nin, nout) - 1.)
     return W.astype('float32')
 
 def rnn_init_weights(rnn, d_out, d_in):
