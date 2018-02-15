@@ -305,23 +305,37 @@ def main():
     train_tgt_insts = convert_instance_to_idx_seq(train_tgt_word_insts, tgt_word2idx)
     valid_tgt_insts = convert_instance_to_idx_seq(valid_tgt_word_insts, tgt_word2idx)
 
-    print('[Info] Convert target language token instances into sequences of word index.')
-    train_tgt_lang_insts = convert_instance_to_idx_seq(train_tgt_lang_word_insts, src_word2idx)
-    valid_tgt_lang_insts = convert_instance_to_idx_seq(valid_tgt_lang_word_insts, src_word2idx)
 
-    data = {
-        'settings': opt,
-        'dict': {
-            'src': src_word2idx,
-            'tgt': tgt_word2idx},
-        'train': {
-            'src': train_src_insts,
-            'tgt': train_tgt_insts,
-            'tgt_lang': train_tgt_lang_insts},
-        'valid': {
-            'src': valid_src_insts,
-            'tgt': valid_tgt_insts,
-            'tgt_lang': valid_tgt_lang_insts}}
+    if opt.tgt_lang:
+        print('[Info] Convert target language token instances into sequences of word index.')
+        train_tgt_lang_insts = convert_instance_to_idx_seq(train_tgt_lang_word_insts, src_word2idx)
+        valid_tgt_lang_insts = convert_instance_to_idx_seq(valid_tgt_lang_word_insts, src_word2idx)
+
+        data = {
+            'settings': opt,
+            'dict': {
+                'src': src_word2idx,
+                'tgt': tgt_word2idx},
+            'train': {
+                'src': train_src_insts,
+                'tgt': train_tgt_insts,
+                'tgt_lang': train_tgt_lang_insts},
+            'valid': {
+                'src': valid_src_insts,
+                'tgt': valid_tgt_insts,
+                'tgt_lang': valid_tgt_lang_insts}}
+    else:
+        data = {
+            'settings': opt,
+            'dict': {
+                'src': src_word2idx,
+                'tgt': tgt_word2idx},
+            'train': {
+                'src': train_src_insts,
+                'tgt': train_tgt_insts},
+            'valid': {
+                'src': valid_src_insts,
+                'tgt': valid_tgt_insts}}
 
     print('[Info] Dumping the processed data to pickle file', opt.save_data)
     torch.save(data, opt.save_data)
