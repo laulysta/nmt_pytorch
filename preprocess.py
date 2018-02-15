@@ -217,6 +217,8 @@ def main():
 
     if opt.train_tgt_lang and opt.valid_tgt_lang:
         opt.tgt_lang = True
+    else:
+        opt.tgt_lang = False
 
     # Train data
     if opt.tgt_lang:
