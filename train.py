@@ -174,7 +174,7 @@ def train(model, training_data, validation_data, validation_data_translate, crit
     p_validation = None
     valid_accus = []
     for ii in range(opt.epoch):
-        print('[ Epoch', epoch_i+1, ']')
+        #print('[ Epoch', epoch_i+1, ']')
 
         start = time.time()
         train_loss, train_accu, epoch_i, nb_examples_seen, pct_next_save = train_epoch(model, training_data, validation_data,
@@ -196,7 +196,7 @@ def train(model, training_data, validation_data, validation_data_translate, crit
 
 
 def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, valid_accu=None, valid_accus=None):
-
+    print('[ Epoch', epoch_i, ']')
     model.eval()
 
     if opt.multi_gpu:
@@ -222,7 +222,6 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
             print('    - [Info] The checkpoint file has been updated.')
 
     ###########################################################################################
-    print('[ Epoch', epoch_i, ']')
     if opt.multi_gpu:
         model_translate = model.module.model
     else:
@@ -278,7 +277,7 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
 
 def load_model(opt):
 
-    checkpoint = torch.load(opt.save_model+'.chkpt')
+    checkpoint = torch.load(opt.reload_model+'.chkpt' if opt.reload_model else opt.save_model+'.chkpt')
     model_opt = checkpoint['settings']
     epoch_i = checkpoint['epoch']
 
@@ -353,6 +352,8 @@ def main():
 
     parser.add_argument('-no_reload', action='store_true')
 
+    parser.add_argument('-reload_model', required=False, default='')
+
     parser.add_argument('-valid_bleu_ref', type=str, default='',
                         help='Path to the reference')
 
@@ -420,12 +421,12 @@ def main():
 
     print(opt)
 
-    if not opt.no_reload and os.path.isfile(opt.save_model+".chkpt"):
+    #Create path if needed
+    pathlib.Path(opt.save_model).parent.mkdir(parents=True, exist_ok=True)
+
+    if not opt.no_reload and (os.path.isfile(opt.save_model+".chkpt") or os.path.isfile(opt.reload_model+".chkpt")):
         modelRNN, optimizer, epoch_i = load_model(opt)
     else:
-        #Create path if needed
-        pathlib.Path(opt.save_model).parent.mkdir(parents=True, exist_ok=True)
-
         #Create model
         epoch_i = 0.0
         modelRNN = NMTmodelRNN(
