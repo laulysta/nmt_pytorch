@@ -315,8 +315,7 @@ def load_model(opt):
     checkpoint = torch.load(opt.reload_model+'.chkpt' if opt.reload_model else opt.save_model+'.chkpt')
     model_opt = checkpoint['settings']
     epoch_i = checkpoint['epoch']
-    best_BLEU = checkpoint['best_BLEU']
-
+    best_BLEU = checkpoint['best_BLEU'] if 'best_BLEU' in checkpoint else -1.0
     modelRNN = NMTmodelRNN(
         model_opt.src_vocab_size,
         model_opt.tgt_vocab_size,
