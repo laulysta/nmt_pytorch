@@ -73,7 +73,7 @@ class MainModel(nn.Module):
         return loss, pred
 
 
-def train_epoch(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, nb_examples_seen, pct_next_save):
+def train_epoch(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, nb_examples_seen, pct_next_save):
     ''' Epoch operation in training phase'''
 
     model.train()
@@ -118,7 +118,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
             pct_next_save += opt.save_freq_pct
             nb_examples_save = training_data.nb_examples*pct_next_save
             epoch_i += opt.save_freq_pct
-            save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i)
+            best_BLEU = save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU)
             model.train()
 
         # note keeping
@@ -129,7 +129,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         n_total_correct += n_correct
         total_loss += loss.data[0]
 
-    return total_loss/n_total_words, n_total_correct/n_total_words, epoch_i, nb_examples_seen, pct_next_save
+    return total_loss/n_total_words, n_total_correct/n_total_words, epoch_i, best_BLEU, nb_examples_seen, pct_next_save
 
 def eval_epoch(model, validation_data, crit, opt):
     ''' Epoch operation in evaluation phase '''
@@ -166,7 +166,7 @@ def eval_epoch(model, validation_data, crit, opt):
 
     return total_loss/n_total_words, n_total_correct/n_total_words
 
-def train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i=0):
+def train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU):
     ''' Start training '''
 
     nb_examples_seen = 0
@@ -174,12 +174,12 @@ def train(model, training_data, validation_data, validation_data_translate, crit
     p_validation = None
     valid_accus = []
     for ii in range(opt.epoch):
-        #print('[ Epoch', epoch_i+1, ']')
+        print('[ Starting epoch', epoch_i+1, ']')
 
         start = time.time()
-        train_loss, train_accu, epoch_i, nb_examples_seen, pct_next_save = train_epoch(model, training_data, validation_data,
+        train_loss, train_accu, epoch_i, best_BLEU, nb_examples_seen, pct_next_save = train_epoch(model, training_data, validation_data,
                                                                                         validation_data_translate, crit, optimizer, opt,
-                                                                                        epoch_i, nb_examples_seen, pct_next_save)
+                                                                                        epoch_i, best_BLEU, nb_examples_seen, pct_next_save)
         print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
               'elapse: {elapse:3.3f} min'.format(
                   ppl=math.exp(min(train_loss, 100)), accu=100*train_accu,
@@ -195,33 +195,40 @@ def train(model, training_data, validation_data, validation_data_translate, crit
         valid_accus += [valid_accu]
 
 
-def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, valid_accu=None, valid_accus=None):
+def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU, valid_accu=None, valid_accus=None):
     print('[ Epoch', epoch_i, ']')
     model.eval()
 
-    if opt.multi_gpu:
-        model_state_dict = model.module.model.state_dict()
-    else:
-        model_state_dict = model.model.state_dict()
-    optimizer_state_dict = optimizer.state_dict()
-    checkpoint = {
-        'model': model_state_dict,
-        'optimizer': optimizer_state_dict,
-        'settings': opt,
-        'epoch': epoch_i}
+    # if opt.multi_gpu:
+    #     model_state_dict = model.module.model.state_dict()
+    # else:
+    #     model_state_dict = model.model.state_dict()
+    # optimizer_state_dict = optimizer.state_dict()
+    # checkpoint = {
+    #     'model': model_state_dict,
+    #     'optimizer': optimizer_state_dict,
+    #     'settings': opt,
+    #     'epoch': epoch_i}
 
-    if opt.save_mode == 'all':
-        model_name = opt.save_model + '_epoch{epoch:3.2f}.chkpt'.format(epoch=epoch_i)
-        torch.save(checkpoint, model_name)
-        torch.save(checkpoint, opt.save_model + '_tmp.chkpt')
-        _ = subprocess.check_output('mv ' + opt.save_model + '_tmp.chkpt' + ' ' + opt.save_model + '.chkpt', shell=True)
-    elif opt.save_mode == 'best':
-        model_name = opt.save_model + '.chkpt'
-        if valid_accu >= max(valid_accus):
-            torch.save(checkpoint, model_name)
-            print('    - [Info] The checkpoint file has been updated.')
+    # if opt.save_mode == 'all':
+    #     model_name = opt.save_model + '_epoch{epoch:3.2f}.chkpt'.format(epoch=epoch_i)
+    #     torch.save(checkpoint, model_name)
+    #     torch.save(checkpoint, opt.save_model + '_tmp.chkpt')
+    #     _ = subprocess.check_output('mv ' + opt.save_model + '_tmp.chkpt' + ' ' + opt.save_model + '.chkpt', shell=True)
+    # elif opt.save_mode == 'best':
+    #     model_name = opt.save_model + '.chkpt'
+    #     torch.save(checkpoint, opt.save_model + '_tmp.chkpt')
+    #     _ = subprocess.check_output('mv ' + opt.save_model + '_tmp.chkpt' + ' ' + opt.save_model + '.chkpt', shell=True)
+    #     if valid_accu >= max(valid_accus):
+    #         torch.save(checkpoint, model_name)
+    #         print('    - [Info] The checkpoint file has been updated.')
 
     ###########################################################################################
+    if opt.save_mode == 'all':
+        model_name = opt.save_model + '_epoch{epoch:3.2f}.chkpt'.format(epoch=epoch_i)
+    elif opt.save_mode == 'best':
+        model_name = opt.save_model + '.chkpt'
+
     if opt.multi_gpu:
         model_translate = model.module.model
     else:
@@ -264,22 +271,51 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
         #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
         out = subprocess.check_output("perl multi-bleu.perl " + opt.valid_bleu_ref + " < " + output_name, shell=True)
         out = out.decode() # because out is binary
+        valid_BLEU = float(out.strip().split()[2][:-1])
     except:
         out = "multi-bleu.perl error"
+        valid_BLEU = -1.0
 
     print(out)
     bleu_file = os.path.dirname(model_name) + '/bleu_scores.txt'
     with open(bleu_file, 'a') as f:
         #f.write("Epoch "+str(epoch_i)+": "+out)
         f.write("Epoch{epoch:3.2f} : {out}".format(epoch=epoch_i, out=out))
-    #return model_name
+    
+    ###########################################################################################################################
 
+    if opt.multi_gpu:
+        model_state_dict = model.module.model.state_dict()
+    else:
+        model_state_dict = model.model.state_dict()
+    optimizer_state_dict = optimizer.state_dict()
+    checkpoint = {
+        'model': model_state_dict,
+        'optimizer': optimizer_state_dict,
+        'settings': opt,
+        'epoch': epoch_i,
+        'best_BLEU': valid_BLEU if valid_BLEU >= best_BLEU else best_BLEU}
+
+    torch.save(checkpoint, opt.save_model + '_tmp.chkpt')
+    _ = subprocess.check_output('mv ' + opt.save_model + '_tmp.chkpt' + ' ' + opt.save_model + '.chkpt', shell=True)
+    if opt.save_mode == 'all':
+        #model_name = opt.save_model + '_epoch{epoch:3.2f}.chkpt'.format(epoch=epoch_i)
+        torch.save(checkpoint, model_name)
+    elif opt.save_mode == 'best':
+        #model_name = opt.save_model + '.chkpt'
+        if valid_BLEU >= best_BLEU:
+            best_BLEU = valid_BLEU
+            torch.save(checkpoint, opt.save_model + '_best_tmp.chkpt')
+            _ = subprocess.check_output('mv ' + opt.save_model + '_best_tmp.chkpt' + ' ' + opt.save_model + '_best.chkpt', shell=True)
+            print('    - [Info] The checkpoint file has been updated.')
+    return best_BLEU
 
 def load_model(opt):
 
     checkpoint = torch.load(opt.reload_model+'.chkpt' if opt.reload_model else opt.save_model+'.chkpt')
     model_opt = checkpoint['settings']
     epoch_i = checkpoint['epoch']
+    best_BLEU = checkpoint['best_BLEU']
 
     modelRNN = NMTmodelRNN(
         model_opt.src_vocab_size,
@@ -311,7 +347,7 @@ def load_model(opt):
     if not opt.no_reload_optimizer:
         optimizer.load_state_dict(checkpoint['optimizer'])
 
-    return modelRNN, optimizer, epoch_i
+    return modelRNN, optimizer, epoch_i, best_BLEU
 
 def main():
     ''' Main function '''
@@ -335,7 +371,7 @@ def main():
 
 
     parser.add_argument('-save_model', required=True)
-    parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='all')
+    parser.add_argument('-save_mode', type=str, choices=['all', 'best'], default='best')
     parser.add_argument('-save_freq_pct', type=float, default=1.0)
 
     parser.add_argument('-no_cuda', action='store_true')
@@ -425,10 +461,11 @@ def main():
     pathlib.Path(opt.save_model).parent.mkdir(parents=True, exist_ok=True)
 
     if not opt.no_reload and (os.path.isfile(opt.save_model+".chkpt") or os.path.isfile(opt.reload_model+".chkpt")):
-        modelRNN, optimizer, epoch_i = load_model(opt)
+        modelRNN, optimizer, epoch_i, best_BLEU = load_model(opt)
     else:
         #Create model
         epoch_i = 0.0
+        best_BLEU = -1.0
         modelRNN = NMTmodelRNN(
             opt.src_vocab_size,
             opt.tgt_vocab_size,
@@ -480,7 +517,7 @@ def main():
     if opt.multi_gpu:
         model = nn.DataParallel(model)
 
-    train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i)
+    train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU)
 
 if __name__ == '__main__':
     main()
