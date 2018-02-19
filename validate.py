@@ -46,7 +46,7 @@ def convert_instance_to_idx_seq(word_insts, word2idx):
     '''Word mapping to idx'''
     return [[word2idx[w] if w in word2idx else Constants.UNK for w in s] for s in word_insts]
 
-def read_instances_from_file(inst_file, keep_case=True):
+def read_instances_from_file(inst_file, target_lang=False, keep_case=True):
     ''' Convert file into word seq lists and vocab '''
     word_insts = []
     with open(inst_file) as f:
@@ -56,7 +56,10 @@ def read_instances_from_file(inst_file, keep_case=True):
             word_inst = sent.split()
 
             if word_inst:
-                word_insts += [[Constants.BOS_WORD] + word_inst + [Constants.EOS_WORD]]
+                if target_lang:
+                    word_insts += [word_inst]
+                else:
+                    word_insts += [[Constants.BOS_WORD] + word_inst + [Constants.EOS_WORD]]
             else:
                 word_insts += [None]
 
@@ -102,12 +105,12 @@ def main():
     #========= Loading Dataset =========#
     data = torch.load(opt.data_dict)
     src_word2idx, tgt_word2idx = data['dict']['src'], data['dict']['tgt']
-
+    
     valid_src_word_insts = read_instances_from_file(opt.val)
     valid_src_insts = convert_instance_to_idx_seq(valid_src_word_insts, src_word2idx)
 
     if opt.val_tgtlang:
-        valid_tgt_lang_word_insts = read_instances_from_file(opt.val_tgtlang)
+        valid_tgt_lang_word_insts = read_instances_from_file(opt.val_tgtlang, target_lang=True)
         valid_tgt_lang_insts = convert_instance_to_idx_seq(valid_tgt_lang_word_insts, src_word2idx)
 
     #import ipdb; ipdb.set_trace()
@@ -125,6 +128,7 @@ def main():
         sort_by_length=False)
 
     ###########################################################################################
+    model_translate.eval()
     with open(output_name, 'w') as f:
         for batch in tqdm(data_set, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
             #import ipdb; ipdb.set_trace()
