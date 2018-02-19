@@ -96,7 +96,8 @@ def main():
 
     #========= Loading Model =========#
     model_translate, epoch_i, best_BLEU, model_opt = load_model(opt)
-
+    if opt.cuda:
+        model_translate = model_translate.cuda()
 
     #========= Loading Dataset =========#
     data = torch.load(opt.data_dict)
