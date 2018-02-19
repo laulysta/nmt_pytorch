@@ -42,20 +42,43 @@ def load_model(opt):
 
     return modelRNN, epoch_i, best_BLEU, model_opt
 
+def convert_instance_to_idx_seq(word_insts, word2idx):
+    '''Word mapping to idx'''
+    return [[word2idx[w] if w in word2idx else Constants.UNK for w in s] for s in word_insts]
+
+def read_instances_from_file(inst_file, keep_case=True):
+    ''' Convert file into word seq lists and vocab '''
+    word_insts = []
+    with open(inst_file) as f:
+        for sent in f:
+            if not keep_case:
+                sent = sent.lower()
+            word_inst = sent.split()
+
+            if word_inst:
+                word_insts += [[Constants.BOS_WORD] + word_inst + [Constants.EOS_WORD]]
+            else:
+                word_insts += [None]
+
+    return word_insts
 
 def main():
     ''' Main function '''
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('-data', required=True)
+    parser.add_argument('-data_dict', required=True)
 
     parser.add_argument('-model_name', required=True)
 
     parser.add_argument('-pred_path', type=str, default='resultTranslation',
                         help='Path to the output translation')
 
-    parser.add_argument('-ref', type=str, default='',
+    parser.add_argument('-ref', required=True,
                         help='Path to the reference')
+    parser.add_argument('-val', required=True,
+                        help='Path to the val data we want to translate')
+    parser.add_argument('-val_tgtlang', type=str, default='',
+                        help='Path to the tgtlang')
 
     parser.add_argument('-batch_size', type=int, default=64)
     parser.add_argument('-no_cuda', action='store_true')
@@ -76,14 +99,24 @@ def main():
 
 
     #========= Loading Dataset =========#
-    data = torch.load(opt.data)
+    data = torch.load(opt.data_dict)
+    src_word2idx, tgt_word2idx = data['dict']['src'], data['dict']['tgt']
+
+    valid_src_word_insts = read_instances_from_file(opt.val)
+    valid_src_insts = convert_instance_to_idx_seq(valid_src_word_insts, src_word2idx)
+
+    if opt.val_tgtlang:
+        valid_tgt_lang_word_insts = read_instances_from_file(opt.val_tgtlang)
+        valid_tgt_lang_insts = convert_instance_to_idx_seq(valid_tgt_lang_word_insts, src_word2idx)
+
+    #import ipdb; ipdb.set_trace()
 
     data_set = DataLoader(
-        data['dict']['src'],
-        data['dict']['tgt'],
-        src_insts=data['valid']['src'],
+        src_word2idx,
+        tgt_word2idx,
+        src_insts=valid_src_insts,
         tgt_insts=None,
-        tgt_lang_insts=(data['valid']['tgt_lang'] if model_opt.target_lang else None),
+        tgt_lang_insts=(valid_tgt_lang_insts if opt.val_tgtlang else None),
         batch_size=opt.batch_size,
         shuffle=False,
         cuda=opt.cuda,
