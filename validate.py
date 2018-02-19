@@ -127,7 +127,7 @@ def main():
     with open(output_name, 'w') as f:
         for batch in tqdm(data_set, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
             #import ipdb; ipdb.set_trace()
-            if model_opt.target_lang:
+            if opt.val_tgtlang:
                 (src_seq, src_pos), (tgt_lang_seq, tgt_lang_pos) = batch
             else:
                 src_seq, src_pos  = batch
@@ -136,7 +136,7 @@ def main():
 
             _, sent_sort_idx = lengths_seq_src.sort(descending=True)
 
-            if model_opt.target_lang:
+            if opt.val_tgtlang:
                 enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
             else:
                 enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
