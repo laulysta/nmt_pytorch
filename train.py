@@ -327,6 +327,7 @@ def load_model(opt):
         n_layers=model_opt.n_layers,
         dropout=model_opt.dropout,
         share_enc_dec=model_opt.share_enc_dec,
+        part_id=model_opt.part_id,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -398,6 +399,8 @@ def main():
     parser.add_argument('-share_enc_dec', action='store_true')
 
     parser.add_argument('-target_lang', action='store_true')
+
+    parser.add_argument('-part_id', action='store_true')
 
     opt = parser.parse_args()
     if opt.save_freq_pct <= 0.0 or opt.save_freq_pct > 1.0:
@@ -476,6 +479,7 @@ def main():
             n_layers=opt.n_layers,
             dropout=opt.dropout,
             share_enc_dec=opt.share_enc_dec,
+            part_id=opt.part_id,
             cuda=opt.cuda)
 
 
