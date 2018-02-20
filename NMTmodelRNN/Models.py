@@ -497,6 +497,8 @@ class Decoder(nn.Module):
 
             y_in_emb = self.emb( Variable( topi ) )
             s_tm1 = s_t
+            if self.part_id:
+                y_in_emb_part = torch.cat((part_rep, y_in_emb), dim=2)
 
         return gen_idx
 
