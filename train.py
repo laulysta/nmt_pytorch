@@ -87,7 +87,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
     for batch in tqdm(
             training_data, mininterval=2,
             desc='  - (Training)   ', leave=False):
-
+        print(training_data._starts)
         # prepare data
         if opt.target_lang:
             src, tgt, tgt_lang = batch
@@ -200,31 +200,6 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
     print('[ Epoch', epoch_i, ']')
     model.eval()
 
-    # if opt.multi_gpu:
-    #     model_state_dict = model.module.model.state_dict()
-    # else:
-    #     model_state_dict = model.model.state_dict()
-    # optimizer_state_dict = optimizer.state_dict()
-    # checkpoint = {
-    #     'model': model_state_dict,
-    #     'optimizer': optimizer_state_dict,
-    #     'settings': opt,
-    #     'epoch': epoch_i}
-
-    # if opt.save_mode == 'all':
-    #     model_name = opt.save_model + '_epoch{epoch:3.2f}.chkpt'.format(epoch=epoch_i)
-    #     torch.save(checkpoint, model_name)
-    #     torch.save(checkpoint, opt.save_model + '_tmp.chkpt')
-    #     _ = subprocess.check_output('mv ' + opt.save_model + '_tmp.chkpt' + ' ' + opt.save_model + '.chkpt', shell=True)
-    # elif opt.save_mode == 'best':
-    #     model_name = opt.save_model + '.chkpt'
-    #     torch.save(checkpoint, opt.save_model + '_tmp.chkpt')
-    #     _ = subprocess.check_output('mv ' + opt.save_model + '_tmp.chkpt' + ' ' + opt.save_model + '.chkpt', shell=True)
-    #     if valid_accu >= max(valid_accus):
-    #         torch.save(checkpoint, model_name)
-    #         print('    - [Info] The checkpoint file has been updated.')
-
-    ###########################################################################################
     if opt.save_mode == 'all':
         model_name = opt.save_model + '_epoch{epoch:3.2f}.chkpt'.format(epoch=epoch_i)
     elif opt.save_mode == 'best':
@@ -357,7 +332,7 @@ def main():
     parser.add_argument('-data', required=True)
 
     parser.add_argument('-epoch', type=int, default=100)
-    parser.add_argument('-batch_size', type=int, default=20)
+    parser.add_argument('-batch_size', type=int, default=64)
 
     parser.add_argument('-d_word_vec', type=int, default=620)
     parser.add_argument('-d_model', type=int, default=1000)

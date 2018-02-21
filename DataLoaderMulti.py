@@ -13,7 +13,7 @@ class DataLoaderMulti(object):
             src_insts=None, tgt_insts=None, tgt_lang_insts=None,
             cuda=True, batch_size=64, shuffle=True,
             is_train=True, sort_by_length=False,
-            maxibatch_size=3):
+            maxibatch_size=20):
 
         assert src_insts
         assert tgt_lang_insts
@@ -22,10 +22,13 @@ class DataLoaderMulti(object):
         if tgt_insts:
             assert len(src_insts) == len(tgt_insts)
 
-        self.nb_examples = len(src_insts)
+        #self.nb_examples = len(src_insts)
         self.cuda = cuda
         self._n_batch = int(np.ceil(len(src_insts) / batch_size))
 
+        if self._n_batch % maxibatch_size:
+            self._n_batch += (maxibatch_size - (self._n_batch % maxibatch_size))
+        self.nb_examples = self._n_batch * batch_size
 
         #########################################################
         list_lang = [tgt_lang_insts[0]]
@@ -216,24 +219,7 @@ class DataLoaderMulti(object):
                     self._tbuf = [tgt_insts[i] for i in sidx]
                     if self._languages:
                         self._cbuf = [tgt_lang_insts[i] for i in sidx]
-                    """
-                    start_idx = batch_idx * self._batch_size
-                    end_idx = (batch_idx + self._maxibatch_size) * self._batch_size
-
-                    src_insts = self._src_insts[start_idx:end_idx]
-                    tgt_insts = self._tgt_insts[start_idx:end_idx]
-
-                    slen = np.array([len(s) for s in src_insts])
-                    sidx = slen.argsort()[::-1]
-
-                    self._sbuf = [src_insts[i] for i in sidx]
-                    self._tbuf = [tgt_insts[i] for i in sidx]
-
-                    if self._tgt_lang_insts:
-                        tgt_lang_insts = self._tgt_lang_insts[start_idx:end_idx]
-                        self._cbuf = [tgt_lang_insts[i] for i in sidx]
-                    """
-
+                    
                 cur_start = (batch_idx % self._maxibatch_size) * self._batch_size
                 cur_end = ((batch_idx % self._maxibatch_size) + 1) * self._batch_size
 
@@ -256,9 +242,5 @@ class DataLoaderMulti(object):
                 raise NotImplementedError
 
         else:
-
-            #if self._need_shuffle:
-            #    self.shuffle()
-
             self._iter_count = 0
             raise StopIteration()
