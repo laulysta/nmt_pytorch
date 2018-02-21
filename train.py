@@ -21,6 +21,7 @@ import NMTmodelRNN.Constants as Constants
 from NMTmodelRNN.Models import NMTmodelRNN
 from NMTmodelRNN.Optim import ScheduledOptim
 from DataLoader import DataLoader
+from DataLoaderMulti import DataLoaderMulti
 #from NMTmodelRNN.Translator import Translator
 from torch.autograd import Variable
 import subprocess
@@ -356,7 +357,7 @@ def main():
     parser.add_argument('-data', required=True)
 
     parser.add_argument('-epoch', type=int, default=100)
-    parser.add_argument('-batch_size', type=int, default=64)
+    parser.add_argument('-batch_size', type=int, default=20)
 
     parser.add_argument('-d_word_vec', type=int, default=620)
     parser.add_argument('-d_model', type=int, default=1000)
@@ -402,6 +403,8 @@ def main():
 
     parser.add_argument('-part_id', action='store_true')
 
+    parser.add_argument('-balanced_data', action='store_true')
+
     opt = parser.parse_args()
     if opt.save_freq_pct <= 0.0 or opt.save_freq_pct > 1.0:
         raise argparse.ArgumentTypeError("-save_freq_pct: %r not in range [0.0, 1.0]"%(opt.save_freq_pct,))
@@ -413,7 +416,8 @@ def main():
     opt.max_token_seq_len = data['settings'].max_token_seq_len
 
     #========= Preparing DataLoader =========#
-    training_data = DataLoader(
+    TrainDataLoader = DataLoaderMulti if opt.balanced_data else DataLoader
+    training_data = TrainDataLoader(
         data['dict']['src'],
         data['dict']['tgt'],
         src_insts=data['train']['src'],
