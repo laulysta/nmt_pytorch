@@ -204,7 +204,7 @@ class Encoder(nn.Module):
         for ii, seq_len in enumerate(x_in_lens):
             tmp = x_in_emb[ii,:seq_len,:]
             x_in_emb_r[ii,:seq_len,:] = flip(tmp, 0)
-
+        #import ipdb; ipdb.set_trace()
         # Add tgt_lang rep
         if l_in is not None:
             l_in_emb = self.emb(l_in)
@@ -328,7 +328,7 @@ class Decoder(nn.Module):
         self.n_max_seq = n_max_seq
         self.part_id = part_id
 
-    def forward(self, h_in, h_in_len, y_in):
+    def forward(self, h_in, h_in_len, y_in, l_in=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
         # h_in_len : (batch_size)
         # y_in : (batch_size, y_seq_len)
@@ -349,6 +349,11 @@ class Decoder(nn.Module):
 
         y_in_emb = self.emb(y_in) # (batch_size, y_seq_len, d_word_vec)
         y_in_emb = self.drop(y_in_emb) # (batch_size, y_seq_len, d_word_vec)
+        #import ipdb; ipdb.set_trace()
+        if l_in is not None:
+            l_in_emb = self.emb(l_in)
+            y_in_emb = torch.cat((l_in_emb, y_in_emb), dim=1) # (batch_size, x_seq_len+1, D_emb)
+            y_seq_len += 1
 
         if self.part_id:
             part_rep = Variable( self.tt.FloatTensor(y_in_emb.size()[0], \
@@ -405,12 +410,16 @@ class Decoder(nn.Module):
 
             s_tm1 = s_t
             # logits : list of (batch_size, vocab_size) vectors
-
+        #import ipdb; ipdb.set_trace()
         ans = torch.cat(logits, 0) # (y_seq_len * batch_size, vocab_size)
         ans = ans.view(y_seq_len, batch_size, self.n_tgt_vocab).transpose(0,1).contiguous()
+        if l_in is not None:
+            ans = ans[:,1:]
+            ans = ans.contiguous()
+            y_seq_len -= 1
         return ans.view(batch_size * y_seq_len, -1)
 
-    def greedy_search(self, h_in, h_in_len):
+    def greedy_search(self, h_in, h_in_len, l_in=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
         # h_in_len : (batch_size)
         h_in_len = h_in_len.data.view(-1).tolist()
@@ -425,9 +434,12 @@ class Decoder(nn.Module):
         s_tm1 = s_tm1.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
                 # (n_layers, batch_size, d_model)
 
-        start = [2 for ii in range(batch_size)] # NOTE <BOS> is always 2
-        ft = self.tt.LongTensor(start)[:,None] # (batch_size, 1)
-        y_in_emb = self.emb( Variable( ft ) ) # (batch_size, 1, d_word_vec)
+        if l_in is not None:
+            y_in_emb = self.emb(l_in)# (batch_size, 1, d_word_vec)
+        else:
+            start = [2 for ii in range(batch_size)] # NOTE <BOS> is always 2
+            ft = self.tt.LongTensor(start)[:,None] # (batch_size, 1)
+            y_in_emb = self.emb( Variable( ft ) ) # (batch_size, 1, d_word_vec)
 
         if self.part_id:
             part_rep = Variable( self.tt.FloatTensor(y_in_emb.size()[0], \
@@ -477,6 +489,16 @@ class Decoder(nn.Module):
             # out (batch_size, 1, d_model)
             # s_t (n_layers, batch_size, d_model)
 
+            if idx == 0 and l_in is not None:
+                start = [2 for ii in range(batch_size)] # NOTE <BOS> is always 2
+                ft = self.tt.LongTensor(start)[:,None] # (batch_size, 1)
+
+                y_in_emb = self.emb( Variable( ft ) ) # (batch_size, 1, d_word_vec)
+                s_tm1 = s_t
+                if self.part_id:
+                    y_in_emb_part = torch.cat((part_rep, y_in_emb), dim=2)
+                continue
+
             fin_y = self.y_to_fin( y_in_emb.view(batch_size, self.d_word_vec) ) # (batch_size, d_word_vec)
             fin_c = self.c_to_fin( c_t ) # (batch_size, d_word_vec)
             fin_s = self.s_to_fin( out.view(batch_size, self.d_model) ) # (batch_size, d_word_vec)
@@ -511,7 +533,8 @@ class NMTmodelRNN(nn.Module):
             self, n_src_vocab, n_tgt_vocab, n_max_seq, n_layers=2,
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
-            share_enc_dec=False, part_id=False, cuda=False):
+            share_enc_dec=False, part_id=False,
+            enc_lang=False, dec_lang=False, cuda=False):
 
         self.n_layers = n_layers
 
@@ -541,17 +564,9 @@ class NMTmodelRNN(nn.Module):
             assert n_src_vocab == n_tgt_vocab, \
             "To share word embedding table, the vocabulary size of src/tgt shall be the same."
             self.encoder.emb.weight = self.decoder.emb.weight
+        self.enc_lang = enc_lang
+        self.dec_lang = dec_lang
 
-    # def get_trainable_parameters(self):
-    #     ''' Avoid updating the position encoding '''
-    #     enc_freezed_param_ids = set(map(id, self.encoder.position_enc.parameters()))
-    #     dec_freezed_param_ids = set(map(id, self.decoder.position_enc.parameters()))
-    #     if (self.use_ctx or self.use_ctx_dep_src or self.use_gated_ctx) and not self.tie_encoders:
-    #         ctx_freezed_param_ids = set(map(id, self.encoder_ctx.position_enc.parameters()))
-    #         freezed_param_ids = enc_freezed_param_ids | dec_freezed_param_ids | ctx_freezed_param_ids
-    #     else:
-    #         freezed_param_ids = enc_freezed_param_ids | dec_freezed_param_ids
-    #     return (p for p in self.parameters() if id(p) not in freezed_param_ids)
 
     def forward(self, src, tgt, tgt_lang=None):
         # src_seq and src_pos: sent_len * batch_size
@@ -566,12 +581,15 @@ class NMTmodelRNN(nn.Module):
         lengths_seq_src, idx_src = src_pos.max(1)
         #lengths_seq_tgt, idx_tgt = tgt_pos.max(1)
 
-        if tgt_lang is not None:
+        if self.enc_lang:
             enc_output = self.encoder(src_seq, lengths_seq_src, tgt_lang_seq)
         else:
             enc_output = self.encoder(src_seq, lengths_seq_src)
         
-        dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq)
+        if self.dec_lang:
+            dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq, tgt_lang_seq)
+        else:
+            dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq)
 
         #import ipdb; ipdb.set_trace()
 

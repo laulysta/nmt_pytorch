@@ -87,7 +87,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
     for batch in tqdm(
             training_data, mininterval=2,
             desc='  - (Training)   ', leave=False):
-        print(training_data._starts)
+        #print(training_data._starts)
         # prepare data
         if opt.target_lang:
             src, tgt, tgt_lang = batch
@@ -223,11 +223,15 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
 
             _, sent_sort_idx = lengths_seq_src.sort(descending=True)
 
-            if opt.target_lang:
+            if opt.enc_lang:
                 enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
             else:
                 enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
-            all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
+
+            if opt.dec_lang:
+                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+            else:
+                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
 
             _, sent_revert_idx = sent_sort_idx.sort()
             sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
@@ -304,6 +308,8 @@ def load_model(opt):
         dropout=model_opt.dropout,
         share_enc_dec=model_opt.share_enc_dec,
         part_id=model_opt.part_id,
+        enc_lang= model_opt.enc_lang,
+        dec_lang=model_opt.dec_lang,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -374,7 +380,8 @@ def main():
 
     parser.add_argument('-share_enc_dec', action='store_true')
 
-    parser.add_argument('-target_lang', action='store_true')
+    parser.add_argument('-enc_lang', action='store_true')
+    parser.add_argument('-dec_lang', action='store_true')
 
     parser.add_argument('-part_id', action='store_true')
 
@@ -385,6 +392,8 @@ def main():
         raise argparse.ArgumentTypeError("-save_freq_pct: %r not in range [0.0, 1.0]"%(opt.save_freq_pct,))
     opt.cuda = not opt.no_cuda
     #opt.d_word_vec = opt.d_model
+
+    opt.target_lang = True if opt.enc_lang or opt.dec_lang else False
 
     #========= Loading Dataset =========#
     data = torch.load(opt.data)
@@ -459,6 +468,8 @@ def main():
             dropout=opt.dropout,
             share_enc_dec=opt.share_enc_dec,
             part_id=opt.part_id,
+            enc_lang=opt.enc_lang,
+            dec_lang=opt.dec_lang,
             cuda=opt.cuda)
 
 
