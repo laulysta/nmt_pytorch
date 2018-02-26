@@ -25,7 +25,7 @@ def load_model(opt):
     model_opt = checkpoint['settings']
     epoch_i = checkpoint['epoch']
     best_BLEU = checkpoint['best_BLEU'] if 'best_BLEU' in checkpoint else -1.0
-    if 'enc_lang' not in checkpoint:
+    if 'enc_lang' not in checkpoint['settings']:
         model_opt.enc_lang = True
         model_opt.dec_lang = False
 
