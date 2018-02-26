@@ -25,6 +25,10 @@ def load_model(opt):
     model_opt = checkpoint['settings']
     epoch_i = checkpoint['epoch']
     best_BLEU = checkpoint['best_BLEU'] if 'best_BLEU' in checkpoint else -1.0
+    if 'enc_lang' not in checkpoint:
+        model_opt.enc_lang = True
+        model_opt.dec_lang = False
+
     modelRNN = NMTmodelRNN(
         model_opt.src_vocab_size,
         model_opt.tgt_vocab_size,
@@ -36,6 +40,9 @@ def load_model(opt):
         n_layers=model_opt.n_layers,
         dropout=model_opt.dropout,
         share_enc_dec=model_opt.share_enc_dec,
+        part_id=model_opt.part_id,
+        enc_lang= model_opt.enc_lang,
+        dec_lang=model_opt.dec_lang,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -141,11 +148,21 @@ def main():
 
             _, sent_sort_idx = lengths_seq_src.sort(descending=True)
 
-            if opt.val_tgtlang:
+            # if opt.val_tgtlang:
+            #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+            # else:
+            #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
+            # all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
+
+            if opt.val_tgtlang and model_opt.enc_lang:
                 enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
             else:
                 enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
-            all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
+
+            if opt.val_tgtlang and model_opt.dec_lang:
+                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+            else:
+                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
 
             _, sent_revert_idx = sent_sort_idx.sort()
             sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
