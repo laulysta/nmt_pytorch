@@ -19,6 +19,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import NMTmodelRNN.Constants as Constants
 from NMTmodelRNN.Models import NMTmodelRNN
+from NMTmodelRNN.Models import flip
 from NMTmodelRNN.Optim import ScheduledOptim
 from DataLoader import DataLoader
 from DataLoaderMulti import DataLoaderMulti
@@ -62,16 +63,36 @@ class MainModel(nn.Module):
         gold = tgt[0][:, 1:]
         
         if tgt_lang:
-            pred = self.model(src, tgt, tgt_lang)
+            pred, logits, logits_r = self.model(src, tgt, tgt_lang)
         else:
-            pred = self.model(src, tgt)
+            pred, logits, logits_r = self.model(src, tgt)
 
         if self.opt.smoothing:
             pred = F.log_softmax(pred, dim=1)
 
         loss = get_loss(self.crit, pred, gold, self.opt)
+        #import ipdb; ipdb.set_trace()
+        if self.opt.enc_LM:
+            gold_enc = src[0]
+
+            lengths_seq_src, _ = src[1].max(1)
+            lengths_seq_src = lengths_seq_src.data.view(-1).tolist()
+
+            gold_enc_r = torch.zeros_like(gold_enc)
+            for ii, seq_len in enumerate(lengths_seq_src):
+                tmp = gold_enc[ii,:seq_len]
+                gold_enc_r[ii,:seq_len] = flip(tmp, 0)
+            gold_enc = gold_enc[:, 1:]
+            gold_enc_r = gold_enc_r[:, 1:]
+            #import ipdb; ipdb.set_trace()
+            loss_enc = get_loss(self.crit, logits, gold_enc, self.opt)
+            loss_enc_r = get_loss(self.crit, logits_r, gold_enc_r, self.opt)
+        else:
+            loss_enc = 0.
+            loss_enc_r = 0.
+        #import ipdb; ipdb.set_trace()
         #g_n_correct = n_correct # hack
-        return loss, pred
+        return loss, pred, loss_enc, loss_enc_r
 
 
 def train_epoch(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, nb_examples_seen, pct_next_save):
@@ -97,9 +118,13 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         # forward
         optimizer.zero_grad()
         if opt.target_lang:
-            loss, pred = model(src, tgt, tgt_lang)
+            loss, pred, loss_enc, loss_enc_r = model(src, tgt, tgt_lang)
         else:
-            loss, pred = model(src, tgt)
+            loss, pred, loss_enc, loss_enc_r = model(src, tgt)
+
+
+        if opt.enc_LM:
+            loss = sum([loss, loss_enc, loss_enc_r])
 
         if opt.multi_gpu:
             loss.backward(torch.ones_like(loss.data))
@@ -154,9 +179,9 @@ def eval_epoch(model, validation_data, crit, opt):
 
         # forward
         if opt.target_lang:
-            loss, pred = model(src, tgt, tgt_lang)
+            loss, pred, loss_enc, loss_enc_r = model(src, tgt, tgt_lang)
         else:
-            loss, pred = model(src, tgt)
+            loss, pred, loss_enc, loss_enc_r = model(src, tgt)
 
         # note keeping
         n_correct = get_performance(pred, gold)
@@ -224,9 +249,9 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
             _, sent_sort_idx = lengths_seq_src.sort(descending=True)
 
             if opt.enc_lang:
-                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+                enc_output, logits, logits_r = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
             else:
-                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
+                enc_output, logits, logits_r = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
 
             if opt.dec_lang:
                 all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
@@ -310,6 +335,7 @@ def load_model(opt):
         part_id=model_opt.part_id,
         enc_lang= model_opt.enc_lang,
         dec_lang=model_opt.dec_lang,
+        enc_LM=model_opt.enc_LM,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -386,6 +412,8 @@ def main():
     parser.add_argument('-part_id', action='store_true')
 
     parser.add_argument('-balanced_data', action='store_true')
+
+    parser.add_argument('-enc_LM', action='store_true')
 
     opt = parser.parse_args()
     if opt.save_freq_pct <= 0.0 or opt.save_freq_pct > 1.0:
@@ -470,6 +498,7 @@ def main():
             part_id=opt.part_id,
             enc_lang=opt.enc_lang,
             dec_lang=opt.dec_lang,
+            enc_LM=opt.enc_LM,
             cuda=opt.cuda)
 
 
