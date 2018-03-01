@@ -155,9 +155,9 @@ def main():
             # all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
 
             if opt.val_tgtlang and model_opt.enc_lang:
-                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+                enc_output, logits, logits_r  = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
             else:
-                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
+                enc_output, logits, logits_r  = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
 
             if opt.val_tgtlang and model_opt.dec_lang:
                 all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
