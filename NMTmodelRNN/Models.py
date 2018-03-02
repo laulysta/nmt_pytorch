@@ -273,7 +273,8 @@ class Decoder(nn.Module):
     # Base recurrent attention-based decoder class.
     def __init__(
              self, n_tgt_vocab, n_max_seq, n_layers=2,
-             d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True, part_id=False, cuda=False):
+             d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True, part_id=False, cuda=False,
+             return_enc_avg=False):
         super(Decoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -327,6 +328,7 @@ class Decoder(nn.Module):
         self.d_word_vec = d_word_vec
         self.n_max_seq = n_max_seq
         self.part_id = part_id
+        self.return_enc_avg = return_enc_avg
 
     def forward(self, h_in, h_in_len, y_in, l_in=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
@@ -339,9 +341,9 @@ class Decoder(nn.Module):
 
         #import ipdb; ipdb.set_trace()
 
-        s_0 = torch.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
-        s_0 = torch.div( s_0, Variable(self.tt.FloatTensor(h_in_len.tolist()).view(-1,1)) )
-        s_0 = self.ctx_to_s0(s_0)
+        s_0_ = torch.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
+        s_0_ = torch.div( s_0_, Variable(self.tt.FloatTensor(h_in_len.tolist()).view(-1,1)) )
+        s_0 = self.ctx_to_s0(s_0_)
         s_0 = F.tanh(s_0)
         s_tm1 = s_0 # (batch_size, n_layers * d_model)
         s_tm1 = s_tm1.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
@@ -417,7 +419,10 @@ class Decoder(nn.Module):
             ans = ans[:,1:]
             ans = ans.contiguous()
             y_seq_len -= 1
-        return ans.view(batch_size * y_seq_len, -1)
+        if self.return_enc_avg:
+            return ans.view(batch_size * y_seq_len, -1), s_0_
+        else:
+            return ans.view(batch_size * y_seq_len, -1)
 
     def greedy_search(self, h_in, h_in_len, l_in=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
@@ -544,7 +549,7 @@ class NMTmodelRNN(nn.Module):
             n_tgt_vocab, n_max_seq, n_layers=n_layers,
             d_word_vec=d_word_vec, d_model=d_model,
             dropout=dropout, no_proj_share_weight = no_proj_share_weight,
-            part_id=part_id, cuda=cuda)
+            part_id=part_id, cuda=cuda, return_enc_avg=True)
 
         if share_enc_dec:
             self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,

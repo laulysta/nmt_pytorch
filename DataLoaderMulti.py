@@ -10,7 +10,7 @@ class DataLoaderMulti(object):
 
     def __init__(
             self, src_word2idx, tgt_word2idx,
-            src_insts=None, tgt_insts=None, tgt_lang_insts=None,
+            src_insts=None, tgt_insts=None, src_lang_insts=None, tgt_lang_insts=None,
             cuda=True, batch_size=64, shuffle=True,
             is_train=True, sort_by_length=False,
             maxibatch_size=20):
@@ -40,23 +40,38 @@ class DataLoaderMulti(object):
                 list_start += [ii]
                 list_lang += [tgt_lang_insts[ii]]
 
+        src_lang_insts = tgt_lang_insts # TODO REMOVE !!!
+
         sources = []
         targets = []
         tgt_langs = []
+        if src_lang_insts:
+            src_lang_dict = {}
+            src_val = 0
+            new_src_lang_insts = []
+            for elt in src_lang_insts:
+                if elt[0] not in src_lang_dict:
+                    src_lang_dict[elt[0]] = src_val
+                    src_val += 1
+                new_src_lang_insts.append([src_lang_dict[elt[0]]])
+            src_lang_insts = new_src_lang_insts
+            src_langs = []
         for ii, start_idx in enumerate(list_start):
             if ii < len(list_start)-1:
                 sources += [src_insts[start_idx: list_start[ii+1]]]
                 if tgt_insts:
                     targets += [tgt_insts[start_idx: list_start[ii+1]]]
                 tgt_langs += [tgt_lang_insts[start_idx: list_start[ii+1]]]
+                if src_lang_insts:
+                    src_langs += [src_lang_insts[start_idx: list_start[ii+1]]]
             else:
                 sources += [src_insts[start_idx:]]
                 if tgt_insts:
                     targets += [tgt_insts[start_idx:]]
                 tgt_langs += [tgt_lang_insts[start_idx:]]
-        #########################################################
-        
-
+                if src_lang_insts:
+                    src_langs += [src_lang_insts[start_idx:]]
+        ########################################################
 
 
         self._batch_size = batch_size
@@ -67,6 +82,7 @@ class DataLoaderMulti(object):
         self._sources = sources
         self._targets = targets if targets else None
         self._languages = tgt_langs
+        self._src_langs = src_langs if src_langs else None
 
         src_idx2word = {idx:word for word, idx in src_word2idx.items()}
         tgt_idx2word = {idx:word for word, idx in tgt_word2idx.items()}
@@ -137,13 +153,20 @@ class DataLoaderMulti(object):
 
     def shuffle(self, idx):
         ''' Shuffle data for a brand new start '''
-        if self._targets:
+        if self._targets and self._src_langs:
+            paired_insts = list(zip(self._sources[idx], self._targets[idx], self._src_langs[idx]))
+            random.shuffle(paired_insts)
+            self._sources[idx], self._targets[idx], self._src_langs[idx] = zip(*paired_insts)
+        elif self._targets:
             paired_insts = list(zip(self._sources[idx], self._targets[idx]))
             random.shuffle(paired_insts)
             self._sources[idx], self._targets[idx] = zip(*paired_insts)
+        elif self._src_langs:
+            paired_insts = list(zip(self._sources[idx], self._src_langs[idx]))
+            random.shuffle(paired_insts)
+            self._sources[idx], self._src_langs[idx] = zip(*paired_insts)
         else:
             random.shuffle(self._sources[idx])
-
 
     def __iter__(self):
         return self
@@ -193,6 +216,7 @@ class DataLoaderMulti(object):
                     src_insts = []
                     tgt_insts = []
                     tgt_lang_insts = []
+                    src_lang_insts = []
 
                     for ii, start_idx in enumerate(self._starts):
                         end_idx = start_idx + self._batch_size * self._maxibatch_size // self._n_langs
@@ -200,6 +224,8 @@ class DataLoaderMulti(object):
                         tgt_insts += self._targets[ii][start_idx:end_idx]
                         if self._languages:
                             tgt_lang_insts += self._languages[ii][start_idx:end_idx]
+                        if self._src_langs:
+                            src_lang_insts += self._src_langs[ii][start_idx:end_idx]
                         if end_idx < len(self._sources[ii]):
                             self._starts[ii] = end_idx
                         else:
@@ -209,6 +235,8 @@ class DataLoaderMulti(object):
                             tgt_insts += self._targets[ii][:delta]
                             if self._languages:
                                 tgt_lang_insts += self._languages[ii][:delta]
+                            if self._src_langs:
+                                src_lang_insts += self._src_langs[ii][:delta]
                             self._starts[ii] = delta
 
 
@@ -219,6 +247,8 @@ class DataLoaderMulti(object):
                     self._tbuf = [tgt_insts[i] for i in sidx]
                     if self._languages:
                         self._cbuf = [tgt_lang_insts[i] for i in sidx]
+                    if self._src_langs:
+                        self._slbuf = [src_lang_insts[i] for i in sidx]
                     
                 cur_start = (batch_idx % self._maxibatch_size) * self._batch_size
                 cur_end = ((batch_idx % self._maxibatch_size) + 1) * self._batch_size
@@ -229,12 +259,24 @@ class DataLoaderMulti(object):
                 cur_tgt_insts = self._tbuf[cur_start:cur_end]
                 tgt_data, tgt_pos = pad_to_longest(cur_tgt_insts)
 
-                if self._languages:
+                if self._src_langs and self._languages:
+                    cur_src_lang_insts = self._slbuf[cur_start:cur_end]
+                    src_lang_data, src_lang_pos = pad_to_longest(cur_src_lang_insts)
+
+                    cur_tgt_lang_insts = self._cbuf[cur_start:cur_end]
+                    tgt_lang_data, tgt_lang_pos = pad_to_longest(cur_tgt_lang_insts)
+
+                    return (src_data, src_pos), (tgt_data, tgt_pos), (src_lang_data, src_lang_pos), (tgt_lang_data, tgt_lang_pos)
+                elif self._src_langs:
+                    cur_src_lang_insts = self._slbuf[cur_start:cur_end]
+                    src_lang_data, src_lang_pos = pad_to_longest(cur_src_lang_insts)
+
+                    return (src_data, src_pos), (tgt_data, tgt_pos), (src_lang_data, src_lang_pos)
+                elif self._languages:
                     cur_tgt_lang_insts = self._cbuf[cur_start:cur_end]
                     tgt_lang_data, tgt_lang_pos = pad_to_longest(cur_tgt_lang_insts)
 
                     return (src_data, src_pos), (tgt_data, tgt_pos), (tgt_lang_data, tgt_lang_pos)
-
                 else:
                     return (src_data, src_pos), (tgt_data, tgt_pos)
 
