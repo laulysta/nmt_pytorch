@@ -502,6 +502,7 @@ def main():
         data['dict']['tgt'],
         src_insts=data['train']['src'],
         tgt_insts=data['train']['tgt'],
+        src_lang_insts=(data['train']['src_lang'] if opt.gan else None),
         tgt_lang_insts=(data['train']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.batch_size,
         cuda=opt.cuda,

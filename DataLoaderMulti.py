@@ -40,8 +40,6 @@ class DataLoaderMulti(object):
                 list_start += [ii]
                 list_lang += [tgt_lang_insts[ii]]
 
-        src_lang_insts = tgt_lang_insts # TODO REMOVE !!!
-
         sources = []
         targets = []
         tgt_langs = []
