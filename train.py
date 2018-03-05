@@ -74,7 +74,7 @@ class MainModel(nn.Module):
         if self.disc:
             enc_log_probs = self.disc.forward(enc_avg) # bs x n_langs
             neg_entropy = torch.sum(enc_log_probs * torch.exp(enc_log_probs))
-            loss = (loss, self.opt.gan_gen_coeff * neg_entropy)
+            loss = (loss, neg_entropy)
             return loss, pred, enc_log_probs
 
         return loss, pred, None
@@ -83,6 +83,8 @@ class MainModel(nn.Module):
 def train_epoch(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, nb_examples_seen, pct_next_save,
         disc=None, disc_crit=None, disc_optimizer=None):
     ''' Epoch operation in training phase'''
+
+    start = time.time()
 
     model.train()
 
@@ -146,15 +148,6 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
             if opt.sch_optim:
                 disc_optimizer.update_learning_rate()
 
-        nb_examples_seen += len(src[0]) # batch size
-        if opt.save_model and nb_examples_seen >= nb_examples_save:
-            pct_next_save += opt.save_freq_pct
-            nb_examples_save = training_data.nb_examples*pct_next_save
-            epoch_i += opt.save_freq_pct
-            best_BLEU = save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU,
-                    disc=disc, disc_optimizer=disc_optimizer)
-            model.train()
-
         # note keeping
         gold = tgt[0][:, 1:]
         n_correct = get_performance(pred, gold)
@@ -166,6 +159,28 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         if opt.gan:
             total_gen_loss += gen_loss.data[0]
             total_disc_loss += disc_loss.data[0]
+
+        nb_examples_seen += len(src[0]) # batch size
+        if opt.save_model and nb_examples_seen >= nb_examples_save:
+            if opt.gan:
+                print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, exp(gen loss): {exp_gen_loss:8.5F}, disc ppl: {disc_ppl:8.5F}, '\
+                  'elapse: {elapse:3.3f} min'.format(
+                      ppl=math.exp(min(total_loss/n_total_words, 100)), accu=100*n_total_correct/n_total_words,
+                      exp_gen_loss=math.exp(min(total_gen_loss/nb_examples_seen, 100)),
+                      disc_ppl=math.exp(min(total_disc_loss/nb_examples_seen, 100)),
+                      elapse=(time.time()-start)/60))
+            else:
+                print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
+                  'elapse: {elapse:3.3f} min'.format(
+                      ppl=math.exp(min(total_loss/n_total_words, 100)), accu=100*n_total_correct/n_total_words,
+                      elapse=(time.time()-start)/60))
+
+            pct_next_save += opt.save_freq_pct
+            nb_examples_save = training_data.nb_examples*pct_next_save
+            epoch_i += opt.save_freq_pct
+            best_BLEU = save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU,
+                    disc=disc, disc_optimizer=disc_optimizer)
+            model.train()
 
     return total_loss/n_total_words, n_total_correct/n_total_words, epoch_i, best_BLEU, nb_examples_seen, pct_next_save, \
             total_gen_loss/nb_examples_seen, total_disc_loss/nb_examples_seen
@@ -219,24 +234,10 @@ def train(model, training_data, validation_data, validation_data_translate, crit
     for ii in range(opt.epoch):
         print('[ Starting epoch', epoch_i+1, ']')
 
-        start = time.time()
         train_loss, train_accu, epoch_i, best_BLEU, nb_examples_seen, pct_next_save, gen_loss, disc_loss = train_epoch(model, training_data, validation_data,
                                                                                         validation_data_translate, crit, optimizer, opt,
                                                                                         epoch_i, best_BLEU, nb_examples_seen, pct_next_save,
                                                                                         disc=disc, disc_crit=disc_crit, disc_optimizer=disc_optimizer)
-        if opt.gan:
-            print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, exp(gen loss): {exp_gen_loss:8.5F}, disc ppl: {disc_ppl:8.5F}, '\
-              'elapse: {elapse:3.3f} min'.format(
-                  ppl=math.exp(min(train_loss, 100)), accu=100*train_accu,
-                  exp_gen_loss=math.exp(min(gen_loss, 100)),
-                  disc_ppl=math.exp(min(disc_loss, 100)),
-                  elapse=(time.time()-start)/60))
-        else:
-            print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
-              'elapse: {elapse:3.3f} min'.format(
-                  ppl=math.exp(min(train_loss, 100)), accu=100*train_accu,
-                  elapse=(time.time()-start)/60))
-
         start = time.time()
         valid_loss, valid_accu = eval_epoch(model, validation_data, crit, opt)
         print('  - (Validation) ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
