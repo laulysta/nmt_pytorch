@@ -94,6 +94,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
 
     total_gen_loss = 0
     total_disc_loss = 0
+    init_nb_examples_seen = nb_examples_seen
 
     nb_examples_save = training_data.nb_examples*pct_next_save
     for batch in tqdm(
@@ -166,8 +167,8 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
                 print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, exp(gen loss): {exp_gen_loss:8.5F}, disc ppl: {disc_ppl:8.5F}, '\
                   'elapse: {elapse:3.3f} min'.format(
                       ppl=math.exp(min(total_loss/n_total_words, 100)), accu=100*n_total_correct/n_total_words,
-                      exp_gen_loss=math.exp(min(total_gen_loss/nb_examples_seen, 100)),
-                      disc_ppl=math.exp(min(total_disc_loss/nb_examples_seen, 100)),
+                      exp_gen_loss=math.exp(min(total_gen_loss/(nb_examples_seen - init_nb_examples_seen), 100)),
+                      disc_ppl=math.exp(min(total_disc_loss/(nb_examples_seen - init_nb_examples_seen), 100)),
                       elapse=(time.time()-start)/60))
             else:
                 print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
@@ -183,7 +184,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
             model.train()
 
     return total_loss/n_total_words, n_total_correct/n_total_words, epoch_i, best_BLEU, nb_examples_seen, pct_next_save, \
-            total_gen_loss/nb_examples_seen, total_disc_loss/nb_examples_seen
+            total_gen_loss/(nb_examples_seen - init_nb_examples_seen), total_disc_loss/(nb_examples_seen - init_nb_examples_seen)
 
 def eval_epoch(model, validation_data, crit, opt):
     ''' Epoch operation in evaluation phase '''
