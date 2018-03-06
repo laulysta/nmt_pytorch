@@ -10,7 +10,7 @@ class DataLoader(object):
 
     def __init__(
             self, src_word2idx, tgt_word2idx,
-            src_insts=None, tgt_insts=None, tgt_lang_insts=None,
+            src_insts=None, tgt_insts=None, src_lang_insts=None, tgt_lang_insts=None,
             cuda=True, batch_size=64, shuffle=True,
             is_train=True, sort_by_length=False,
             maxibatch_size=20):
@@ -30,6 +30,21 @@ class DataLoader(object):
         self._src_insts = src_insts
         self._tgt_insts = tgt_insts
         self._tgt_lang_insts = tgt_lang_insts
+
+        if src_lang_insts:
+            src_lang_dict = {}
+            src_val = 0
+            new_src_lang_insts = []
+            for elt in src_lang_insts:
+                if elt[0] not in src_lang_dict:
+                    src_lang_dict[elt[0]] = src_val
+                    src_val += 1
+                new_src_lang_insts.append([src_lang_dict[elt[0]]])
+            self._src_lang_insts = new_src_lang_insts
+            self._src_langs = True # Used by train.py
+        else:
+            self._src_lang_insts = None
+            self._src_langs = False
 
         src_idx2word = {idx:word for word, idx in src_word2idx.items()}
         tgt_idx2word = {idx:word for word, idx in tgt_word2idx.items()}
@@ -92,15 +107,25 @@ class DataLoader(object):
     def shuffle(self):
         ''' Shuffle data for a brand new start '''
         if self._tgt_insts:
-            if self._tgt_lang_insts:
-                paired_insts = list(zip(self._src_insts, self._tgt_insts, self._tgt_lang_insts))
-                random.shuffle(paired_insts)
-                self._src_insts, self._tgt_insts, self._tgt_lang_insts = zip(*paired_insts)
+            if self._src_lang_insts:
+                if self._tgt_lang_insts:
+                    paired_insts = list(zip(self._src_insts, self._tgt_insts, self._src_lang_insts, self._tgt_lang_insts))
+                    random.shuffle(paired_insts)
+                    self._src_insts, self._tgt_insts, self._src_lang_insts, self._tgt_lang_insts = zip(*paired_insts)
+                else:
+                    paired_insts = list(zip(self._src_insts, self._tgt_insts, self._src_lang_insts))
+                    random.shuffle(paired_insts)
+                    self._src_insts, self._tgt_insts, self._src_lang_insts = zip(*paired_insts)
             else:
-                paired_insts = list(zip(self._src_insts, self._tgt_insts))
-                random.shuffle(paired_insts)
-                self._src_insts, self._tgt_insts = zip(*paired_insts)
-        else:
+                if self._tgt_lang_insts:
+                    paired_insts = list(zip(self._src_insts, self._tgt_insts, self._tgt_lang_insts))
+                    random.shuffle(paired_insts)
+                    self._src_insts, self._tgt_insts, self._tgt_lang_insts = zip(*paired_insts)
+                else:
+                    paired_insts = list(zip(self._src_insts, self._tgt_insts))
+                    random.shuffle(paired_insts)
+                    self._src_insts, self._tgt_insts = zip(*paired_insts)
+        else: # Valid or test
             if self._tgt_lang_insts:
                 paired_insts = list(zip(self._src_insts, self._tgt_lang_insts))
                 random.shuffle(paired_insts)
@@ -166,6 +191,9 @@ class DataLoader(object):
                     self._sbuf = [src_insts[i] for i in sidx]
                     self._tbuf = [tgt_insts[i] for i in sidx]
 
+                    if self._src_lang_insts:
+                        src_lang_insts = self._src_lang_insts[start_idx:end_idx]
+                        self._slbuf = [src_lang_insts[i] for i in sidx]
                     if self._tgt_lang_insts:
                         tgt_lang_insts = self._tgt_lang_insts[start_idx:end_idx]
                         self._cbuf = [tgt_lang_insts[i] for i in sidx]
@@ -179,21 +207,32 @@ class DataLoader(object):
                 cur_tgt_insts = self._tbuf[cur_start:cur_end]
                 tgt_data, tgt_pos = pad_to_longest(cur_tgt_insts)
 
+                if self._src_lang_insts:
+                    cur_src_lang_insts = self._slbuf[cur_start:cur_end]
+                    src_lang_data, src_lang_pos = pad_to_longest(cur_src_lang_insts)
+
                 if self._tgt_lang_insts:
                     cur_tgt_lang_insts = self._cbuf[cur_start:cur_end]
                     tgt_lang_data, tgt_lang_pos = pad_to_longest(cur_tgt_lang_insts)
-
-                    return (src_data, src_pos), (tgt_data, tgt_pos), (tgt_lang_data, tgt_lang_pos)
-
+                    if self._src_lang_insts:
+                        return (src_data, src_pos), (tgt_data, tgt_pos), (src_lang_data, src_lang_pos), (tgt_lang_data, tgt_lang_pos)
+                    else:
+                        return (src_data, src_pos), (tgt_data, tgt_pos), (tgt_lang_data, tgt_lang_pos)
                 else:
-                    return (src_data, src_pos), (tgt_data, tgt_pos)
-
+                    if self._src_lang_insts:
+                        return (src_data, src_pos), (tgt_data, tgt_pos), (src_lang_data, src_lang_pos)
+                    else:
+                        return (src_data, src_pos), (tgt_data, tgt_pos)
             else:
                 start_idx = batch_idx * self._batch_size
                 end_idx = (batch_idx + 1) * self._batch_size
 
                 src_insts = self._src_insts[start_idx:end_idx]
                 src_data, src_pos = pad_to_longest(src_insts)
+
+                if self._src_lang_insts:
+                    src_lang_insts = self._src_lang_insts[start_idx:end_idx]
+                    src_lang_data, src_lang_pos = pad_to_longest(src_lang_insts)
 
                 if self._tgt_lang_insts:
                     tgt_lang_insts = self._tgt_lang_insts[start_idx:end_idx]
@@ -208,9 +247,15 @@ class DataLoader(object):
                     tgt_insts = self._tgt_insts[start_idx:end_idx]
                     tgt_data, tgt_pos = pad_to_longest(tgt_insts)
                     if self._tgt_lang_insts:
-                        return (src_data, src_pos), (tgt_data, tgt_pos), (tgt_lang_data, tgt_lang_pos)
+                         if self._src_lang_insts:
+                            return (src_data, src_pos), (tgt_data, tgt_pos), (src_lang_data, src_lang_pos), (tgt_lang_data, tgt_lang_pos)
+                         else:
+                            return (src_data, src_pos), (tgt_data, tgt_pos), (tgt_lang_data, tgt_lang_pos)
                     else:
-                        return (src_data, src_pos), (tgt_data, tgt_pos)
+                         if self._src_lang_insts:
+                            return (src_data, src_pos), (tgt_data, tgt_pos), (src_lang_data, src_lang_pos)
+                         else:
+                            return (src_data, src_pos), (tgt_data, tgt_pos)
 
         else:
 
