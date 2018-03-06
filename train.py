@@ -223,13 +223,15 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
 
             _, sent_sort_idx = lengths_seq_src.sort(descending=True)
 
+            tgt_lang_oneHot = model_translate.lang2oneHot(tgt_lang_seq)
+
             if opt.enc_lang:
                 enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
             else:
                 enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
 
             if opt.dec_lang:
-                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx], tgt_lang_oneHot[sent_sort_idx])
             else:
                 all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
 
@@ -310,6 +312,7 @@ def load_model(opt):
         part_id=model_opt.part_id,
         enc_lang= model_opt.enc_lang,
         dec_lang=model_opt.dec_lang,
+        langIdx2oneHotIdx=model_opt.langIdx2oneHotIdx,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -330,6 +333,21 @@ def load_model(opt):
         optimizer.load_state_dict(checkpoint['optimizer'])
 
     return modelRNN, optimizer, epoch_i, best_BLEU
+
+def dict_lang(lang_data, cuda=False):
+    lang_token_idx = set()
+    #import ipdb; ipdb.set_trace()
+    for ii in lang_data:
+        lang_token_idx.add(ii[0])
+    list_lang_idx = list(lang_token_idx)
+    list_lang_idx.sort()
+
+    nb_lang = len(list_lang_idx)
+    langIdx2oneHotIdx = {}
+    for ii, idx in enumerate(list_lang_idx):
+        langIdx2oneHotIdx[idx] = ii
+    
+    return langIdx2oneHotIdx
 
 def main():
     ''' Main function '''
@@ -439,6 +457,10 @@ def main():
     opt.src_vocab_size = training_data.src_vocab_size
     opt.tgt_vocab_size = training_data.tgt_vocab_size
 
+    
+    langIdx2oneHotIdx = dict_lang(data['train']['tgt_lang'], cuda=opt.cuda) if opt.dec_lang else None
+
+    #import ipdb; ipdb.set_trace()
 
     #========= Preparing Model =========#
     if opt.embs_share_weight and training_data.src_word2idx != training_data.tgt_word2idx:
@@ -470,6 +492,7 @@ def main():
             part_id=opt.part_id,
             enc_lang=opt.enc_lang,
             dec_lang=opt.dec_lang,
+            langIdx2oneHotIdx=langIdx2oneHotIdx,
             cuda=opt.cuda)
 
 

@@ -43,6 +43,7 @@ def load_model(opt):
         part_id=model_opt.part_id,
         enc_lang= model_opt.enc_lang,
         dec_lang=model_opt.dec_lang,
+        lang_idx2oneHot=model_opt.lang_idx2oneHot,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -148,6 +149,8 @@ def main():
 
             _, sent_sort_idx = lengths_seq_src.sort(descending=True)
 
+            tgt_lang_oneHot = model_translate.lang2oneHot(tgt_lang_seq)
+
             # if opt.val_tgtlang:
             #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
             # else:
@@ -160,7 +163,7 @@ def main():
                 enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
 
             if opt.val_tgtlang and model_opt.dec_lang:
-                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx], tgt_lang_oneHot[sent_sort_idx])
             else:
                 all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
 
