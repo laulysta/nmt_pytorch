@@ -128,6 +128,7 @@ class EncoderFast(nn.Module):
 
         # Lengths data is wrapped inside a Variable.
         x_in_lens = x_in_lens.data.view(-1).tolist()
+        import ipdb; ipdb.set_trace()
         pack = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb, x_in_lens, batch_first=True)
 
         # input (batch_size, x_seq_len, D_emb)
@@ -419,10 +420,7 @@ class Decoder(nn.Module):
             ans = ans[:,1:]
             ans = ans.contiguous()
             y_seq_len -= 1
-        if self.return_enc_avg:
-            return ans.view(batch_size * y_seq_len, -1), s_0_
-        else:
-            return ans.view(batch_size * y_seq_len, -1)
+        return ans.view(batch_size * y_seq_len, -1)
 
     def greedy_search(self, h_in, h_in_len, l_in=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
@@ -599,4 +597,4 @@ class NMTmodelRNN(nn.Module):
         #import ipdb; ipdb.set_trace()
 
         
-        return dec_output
+        return dec_output, enc_output, lengths_seq_src
