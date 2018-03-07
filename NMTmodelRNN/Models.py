@@ -595,7 +595,7 @@ class NMTmodelRNN(nn.Module):
 
 
         #import ipdb; ipdb.set_trace()
-        oh = Variable(self.tt.from_numpy(oh).type('torch.FloatTensor') )
+        oh = Variable(torch.from_numpy(oh).type('torch.FloatTensor') )
 
         #if self.cuda:
         #    oh = oh.cuda()
