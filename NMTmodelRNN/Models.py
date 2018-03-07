@@ -585,8 +585,7 @@ class NMTmodelRNN(nn.Module):
 
 
     def lang2oneHot(self, tgt_lang_seq):
-        #oh = Variable( torch.FloatTensor(tgt_lang_seq.size()[0], len(self.langIdx2oneHotIdx)).zero_() )
-        oh = np.zeros((tgt_lang_seq.size()[0], len(self.langIdx2oneHotIdx)))
+        oh = self.tt.FloatTensor(tgt_lang_seq.size()[0], len(self.langIdx2oneHotIdx)).zero_()
         
         lang_seq = tgt_lang_seq.data.tolist()
         for ii, ll in enumerate(lang_seq):
@@ -595,10 +594,7 @@ class NMTmodelRNN(nn.Module):
 
 
         #import ipdb; ipdb.set_trace()
-        oh = Variable(torch.from_numpy(oh).type('torch.FloatTensor') )
-
-        #if self.cuda:
-        #    oh = oh.cuda()
+        oh = Variable(oh)
 
         return oh
 
