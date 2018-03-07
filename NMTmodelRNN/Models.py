@@ -128,7 +128,6 @@ class EncoderFast(nn.Module):
 
         # Lengths data is wrapped inside a Variable.
         x_in_lens = x_in_lens.data.view(-1).tolist()
-        import ipdb; ipdb.set_trace()
         pack = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb, x_in_lens, batch_first=True)
 
         # input (batch_size, x_seq_len, D_emb)
