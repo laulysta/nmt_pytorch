@@ -581,7 +581,7 @@ class NMTmodelRNN(nn.Module):
         self.enc_lang = enc_lang
         self.dec_lang = dec_lang
         self.langIdx2oneHotIdx = langIdx2oneHotIdx
-        self.cuda = cuda
+        self.tt = torch.cuda if cuda else torch
 
 
     def lang2oneHot(self, tgt_lang_seq):
@@ -595,10 +595,10 @@ class NMTmodelRNN(nn.Module):
 
 
         #import ipdb; ipdb.set_trace()
-        oh = Variable(torch.from_numpy(oh).type('torch.FloatTensor') )
+        oh = Variable(self.tt.from_numpy(oh).type('torch.FloatTensor') )
 
-        if self.cuda:
-            oh = oh.cuda()
+        #if self.cuda:
+        #    oh = oh.cuda()
 
         return oh
 
