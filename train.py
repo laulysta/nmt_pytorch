@@ -26,6 +26,8 @@ from DataLoaderMulti import DataLoaderMulti
 from torch.autograd import Variable
 import subprocess
 
+from validate import prepare_data, translate_data
+
 def get_loss(crit, pred, gold, opt, smoothing_eps=0.1):
     ''' Apply label smoothing if needed '''
 
@@ -328,6 +330,22 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
         f.write("Epoch{epoch:3.2f} : {out}".format(epoch=epoch_i, out=out))
     
     ###########################################################################################################################
+    if opt.extra_valid_src and opt.extra_valid_tgt: # and opt.extra_valid_tgtLang:
+        assert len(opt.extra_valid_src) == len(opt.extra_valid_tgt)
+        if opt.extra_valid_tgtLang:
+            assert len(opt.extra_valid_src) == len(opt.extra_valid_tgtLang)
+        else:
+            opt.extra_valid_tgtLang = [None] * len(opt.extra_valid_src)
+
+        for ii, (src_path, tgt_path, tgtLang_path) in enumerate(zip(opt.extra_valid_src, opt.extra_valid_tgt, opt.extra_valid_tgtLang)):
+            data_set = prepare_data(src_path, validation_data.src_word2idx, validation_data.tgt_word2idx, opt, tgtLang_path=tgtLang_path)
+            extra_bleu_file_name = 'bleu_scores_extra' + str(ii+1) + '.txt'
+            extra_output_name = output_name + '_extra' + str(ii+1)
+            translate_data(model_translate, data_set, extra_output_name, opt, tgt_path, bleu_file_name=extra_bleu_file_name, tgtLang=tgtLang_path)
+
+
+
+    ###########################################################################################################################
 
     if opt.multi_gpu:
         model_state_dict = model.module.model.state_dict()
@@ -495,7 +513,12 @@ def main():
             help='All discriminator dimensions (including input and output)')
     parser.add_argument('-gan_gen_coeff', type=float, default=1.)
     parser.add_argument('-gan_every_step', action='store_true')
+
+    parser.add_argument('-extra_valid_src', type=str, nargs='+', help='Path extra valid source')
+    parser.add_argument('-extra_valid_tgt', type=str, nargs='+', help='Path extra valid target')
+    parser.add_argument('-extra_valid_tgtLang', type=str, nargs='+', help='Path extra valid target language')
     opt = parser.parse_args()
+
 
     if opt.save_freq_pct <= 0.0 or opt.save_freq_pct > 1.0:
         raise argparse.ArgumentTypeError("-save_freq_pct: %r not in range [0.0, 1.0]"%(opt.save_freq_pct,))
@@ -643,14 +666,14 @@ def main():
             disc = disc.cuda()
             disc_crit = disc_crit.cuda()
 
-    model = MainModel(modelRNN, crit, opt, disc if disc else None)
+    model = MainModel(modelRNN, crit, opt, disc if opt.gan else None)
     if opt.multi_gpu:
         model = nn.DataParallel(model)
 
     train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU,
-         disc=disc if disc else None,
-         disc_crit=disc_crit if disc_crit else None,
-         disc_optimizer=disc_optimizer if disc_optimizer else None)
+         disc=disc if opt.gan else None,
+         disc_crit=disc_crit if opt.gan else None,
+         disc_optimizer=disc_optimizer if opt.gan else None)
 
 if __name__ == '__main__':
     main()

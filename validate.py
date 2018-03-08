@@ -47,6 +47,8 @@ def load_model(opt):
 
     modelRNN.load_state_dict(checkpoint['model'])
 
+    print('Model info|| Best BLEU valid (greedy, epoch{epoch:3.2f}): {best_BLEU}'.format(epoch=epoch_i, best_BLEU=best_BLEU))
+
     return modelRNN, epoch_i, best_BLEU, model_opt
 
 def convert_instance_to_idx_seq(word_insts, word2idx):
@@ -71,6 +73,94 @@ def read_instances_from_file(inst_file, target_lang=False, keep_case=True):
                 word_insts += [None]
 
     return word_insts
+
+def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, tgtLang_path=None):
+    valid_src_word_insts = read_instances_from_file(src_path)
+    valid_src_insts = convert_instance_to_idx_seq(valid_src_word_insts, src_word2idx)
+
+    if tgtLang_path:
+        valid_tgt_lang_word_insts = read_instances_from_file(tgtLang_path, target_lang=True)
+        valid_tgt_lang_insts = convert_instance_to_idx_seq(valid_tgt_lang_word_insts, src_word2idx)
+
+    #import ipdb; ipdb.set_trace()
+
+    data_set = DataLoader(
+        src_word2idx,
+        tgt_word2idx,
+        src_insts=valid_src_insts,
+        tgt_insts=None,
+        tgt_lang_insts=(valid_tgt_lang_insts if tgtLang_path else None),
+        batch_size=opt.batch_size,
+        shuffle=False,
+        cuda=opt.cuda,
+        is_train=False,
+        sort_by_length=False)
+
+    return data_set
+
+def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_file_name='bleu_scores.txt', tgtLang=''):
+    model_translate.eval()
+    with open(output_name, 'w') as f:
+        for batch in tqdm(data_set, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
+            #import ipdb; ipdb.set_trace()
+            if tgtLang:
+                (src_seq, src_pos), (tgt_lang_seq, tgt_lang_pos) = batch
+            else:
+                src_seq, src_pos  = batch
+            
+            lengths_seq_src, idx_src = src_pos.max(1)
+
+            _, sent_sort_idx = lengths_seq_src.sort(descending=True)
+
+            # if tgtLang:
+            #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+            # else:
+            #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
+            # all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
+
+            if tgtLang and model_opt.enc_lang:
+                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+            else:
+                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
+
+            if tgtLang and model_opt.dec_lang:
+                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+            else:
+                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
+
+            _, sent_revert_idx = sent_sort_idx.sort()
+            sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
+            all_hyp = np.array(all_hyp)
+            all_hyp = all_hyp[sent_revert_idx]
+
+            #import ipdb; ipdb.set_trace()
+            for idx_seq in all_hyp:
+                if len(idx_seq) > 0: 
+                    if idx_seq[-1] == Constants.EOS: # if last word is EOS
+                        idx_seq = idx_seq[:-1]
+                    pred_line = ' '.join([data_set.tgt_idx2word[idx] for idx in idx_seq])
+                    f.write(pred_line + '\n')
+                else:
+                    f.write('\n')
+    try:
+        #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
+        out = subprocess.check_output("perl multi-bleu.perl " + ref + " < " + output_name, shell=True)
+        out = out.decode() # because out is binary
+        valid_BLEU = float(out.strip().split()[2][:-1])
+    except:
+        out = "multi-bleu.perl error"
+        valid_BLEU = -1.0
+
+    #print(out)
+    #import ipdb; ipdb.set_trace()
+    bleu_file = os.path.join(os.path.dirname(output_name), bleu_file_name)
+    #bleu_file = 'bleu_scores.txt' ####TODO: FIX me
+    with open(bleu_file, 'a') as f:
+        #f.write("Epoch "+str(epoch_i)+": "+out)
+        f.write(os.path.basename(ref) + " : {out}".format(out=out))
+    print(os.path.basename(ref) + " : {out}".format(out=out))
+    
+
 
 def main():
     ''' Main function '''
@@ -113,88 +203,93 @@ def main():
     data = torch.load(opt.data_dict)
     src_word2idx, tgt_word2idx = data['dict']['src'], data['dict']['tgt']
     
-    valid_src_word_insts = read_instances_from_file(opt.val)
-    valid_src_insts = convert_instance_to_idx_seq(valid_src_word_insts, src_word2idx)
+    # valid_src_word_insts = read_instances_from_file(opt.val)
+    # valid_src_insts = convert_instance_to_idx_seq(valid_src_word_insts, src_word2idx)
 
-    if opt.val_tgtlang:
-        valid_tgt_lang_word_insts = read_instances_from_file(opt.val_tgtlang, target_lang=True)
-        valid_tgt_lang_insts = convert_instance_to_idx_seq(valid_tgt_lang_word_insts, src_word2idx)
+    # if opt.val_tgtlang:
+    #     valid_tgt_lang_word_insts = read_instances_from_file(opt.val_tgtlang, target_lang=True)
+    #     valid_tgt_lang_insts = convert_instance_to_idx_seq(valid_tgt_lang_word_insts, src_word2idx)
 
-    #import ipdb; ipdb.set_trace()
+    # #import ipdb; ipdb.set_trace()
 
-    data_set = DataLoader(
-        src_word2idx,
-        tgt_word2idx,
-        src_insts=valid_src_insts,
-        tgt_insts=None,
-        tgt_lang_insts=(valid_tgt_lang_insts if opt.val_tgtlang else None),
-        batch_size=opt.batch_size,
-        shuffle=False,
-        cuda=opt.cuda,
-        is_train=False,
-        sort_by_length=False)
+    # data_set = DataLoader(
+    #     src_word2idx,
+    #     tgt_word2idx,
+    #     src_insts=valid_src_insts,
+    #     tgt_insts=None,
+    #     tgt_lang_insts=(valid_tgt_lang_insts if opt.val_tgtlang else None),
+    #     batch_size=opt.batch_size,
+    #     shuffle=False,
+    #     cuda=opt.cuda,
+    #     is_train=False,
+    #     sort_by_length=False)
 
+    data_set = prepare_data(opt.val, src_word2idx, tgt_word2idx, opt, tgtLang_path=opt.val_tgtlang)
+
+    translate_data(model_translate, data_set, output_name, model_opt, opt.ref, tgtLang=opt.val_tgtlang)
     ###########################################################################################
-    model_translate.eval()
-    with open(output_name, 'w') as f:
-        for batch in tqdm(data_set, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
-            #import ipdb; ipdb.set_trace()
-            if opt.val_tgtlang:
-                (src_seq, src_pos), (tgt_lang_seq, tgt_lang_pos) = batch
-            else:
-                src_seq, src_pos  = batch
+    # model_translate.eval()
+    # with open(output_name, 'w') as f:
+    #     for batch in tqdm(data_set, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
+    #         #import ipdb; ipdb.set_trace()
+    #         if opt.val_tgtlang:
+    #             (src_seq, src_pos), (tgt_lang_seq, tgt_lang_pos) = batch
+    #         else:
+    #             src_seq, src_pos  = batch
             
-            lengths_seq_src, idx_src = src_pos.max(1)
+    #         lengths_seq_src, idx_src = src_pos.max(1)
 
-            _, sent_sort_idx = lengths_seq_src.sort(descending=True)
+    #         _, sent_sort_idx = lengths_seq_src.sort(descending=True)
 
-            # if opt.val_tgtlang:
-            #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
-            # else:
-            #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
-            # all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
+    #         # if opt.val_tgtlang:
+    #         #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+    #         # else:
+    #         #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
+    #         # all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
 
-            if opt.val_tgtlang and model_opt.enc_lang:
-                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
-            else:
-                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
+    #         if opt.val_tgtlang and model_opt.enc_lang:
+    #             enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+    #         else:
+    #             enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
 
-            if opt.val_tgtlang and model_opt.dec_lang:
-                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
-            else:
-                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
+    #         if opt.val_tgtlang and model_opt.dec_lang:
+    #             all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+    #         else:
+    #             all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
 
-            _, sent_revert_idx = sent_sort_idx.sort()
-            sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
-            all_hyp = np.array(all_hyp)
-            all_hyp = all_hyp[sent_revert_idx]
+    #         _, sent_revert_idx = sent_sort_idx.sort()
+    #         sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
+    #         all_hyp = np.array(all_hyp)
+    #         all_hyp = all_hyp[sent_revert_idx]
 
-            #import ipdb; ipdb.set_trace()
-            for idx_seq in all_hyp:
-                if len(idx_seq) > 0: 
-                    if idx_seq[-1] == Constants.EOS: # if last word is EOS
-                        idx_seq = idx_seq[:-1]
-                    pred_line = ' '.join([data_set.tgt_idx2word[idx] for idx in idx_seq])
-                    f.write(pred_line + '\n')
-                else:
-                    f.write('\n')
-    try:
-        #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
-        out = subprocess.check_output("perl multi-bleu.perl " + opt.ref + " < " + output_name, shell=True)
-        out = out.decode() # because out is binary
-        valid_BLEU = float(out.strip().split()[2][:-1])
-    except:
-        out = "multi-bleu.perl error"
-        valid_BLEU = -1.0
+    #         #import ipdb; ipdb.set_trace()
+    #         for idx_seq in all_hyp:
+    #             if len(idx_seq) > 0: 
+    #                 if idx_seq[-1] == Constants.EOS: # if last word is EOS
+    #                     idx_seq = idx_seq[:-1]
+    #                 pred_line = ' '.join([data_set.tgt_idx2word[idx] for idx in idx_seq])
+    #                 f.write(pred_line + '\n')
+    #             else:
+    #                 f.write('\n')
+    # try:
+    #     #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
+    #     out = subprocess.check_output("perl multi-bleu.perl " + opt.ref + " < " + output_name, shell=True)
+    #     out = out.decode() # because out is binary
+    #     valid_BLEU = float(out.strip().split()[2][:-1])
+    # except:
+    #     out = "multi-bleu.perl error"
+    #     valid_BLEU = -1.0
 
-    #print(out)
-    #import ipdb; ipdb.set_trace()
-    bleu_file = os.path.dirname(output_name) + '/bleu_scores.txt'
-    with open(bleu_file, 'a') as f:
-        #f.write("Epoch "+str(epoch_i)+": "+out)
-        f.write("Result : {out}".format(out=out))
-    print("Result : {out}".format(out=out))
-    print('Best BLEU valid (greedy, epoch{epoch:3.2f}): {best_BLEU}'.format(epoch=epoch_i, best_BLEU=best_BLEU))
+    # #print(out)
+    # #import ipdb; ipdb.set_trace()
+    # bleu_file = os.path.dirname(output_name) + '/bleu_scores.txt'
+    # with open(bleu_file, 'a') as f:
+    #     #f.write("Epoch "+str(epoch_i)+": "+out)
+    #     f.write("Result : {out}".format(out=out))
+    # print("Result : {out}".format(out=out))
+    # print('Best BLEU valid (greedy, epoch{epoch:3.2f}): {best_BLEU}'.format(epoch=epoch_i, best_BLEU=best_BLEU))
+
+
 
 
 if __name__ == '__main__':
