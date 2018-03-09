@@ -104,6 +104,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
     model.train()
 
     total_loss = 0
+    n_total_src_words = 0
     n_total_words = 0
     n_total_correct = 0
 
@@ -184,6 +185,8 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         n_total_correct += n_correct
         total_loss += ce_loss.data[0]
 
+        n_total_src_words += src[0].data.ne(Constants.PAD).sum()
+
         if opt.gan:
             total_gen_loss += gen_loss.data[0]
             total_disc_loss += disc_loss.data[0]
@@ -191,7 +194,10 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         nb_examples_seen += len(src[0]) # batch size
         if opt.save_model and nb_examples_seen >= nb_examples_save:
             if opt.gan:
-                gan_examples = n_total_words if opt.gan_every_step else (nb_examples_seen - init_nb_examples_seen)
+                if opt.gan_every_step or opt.gan_attn_output:
+                    gan_examples = n_total_src_words * opt.gan_every_step + n_total_words * opt.gan_attn_output
+                else:
+                    gan_examples = nb_examples_seen - init_nb_examples_seen
                 print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, exp(gen loss): {exp_gen_loss:8.5F}, disc ppl: {disc_ppl:8.5F}, '\
                   'elapse: {elapse:3.3f} min'.format(
                       ppl=math.exp(min(total_loss/n_total_words, 100)), accu=100*n_total_correct/n_total_words,
@@ -211,7 +217,10 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
                     disc=disc, disc_optimizer=disc_optimizer)
             model.train()
 
-    gan_examples = n_total_words if opt.gan_every_step else (nb_examples_seen - init_nb_examples_seen)
+    if opt.gan_every_step or opt.gan_attn_output:
+        gan_examples = n_total_src_words * opt.gan_every_step + n_total_words * opt.gan_attn_output
+    else:
+        gan_examples = nb_examples_seen - init_nb_examples_seen
     return total_loss/n_total_words, n_total_correct/n_total_words, epoch_i, best_BLEU, nb_examples_seen, pct_next_save, \
             total_gen_loss/gan_examples, total_disc_loss/gan_examples
 
