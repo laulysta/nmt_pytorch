@@ -322,10 +322,18 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
             else:
                 enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
 
-            if opt.dec_lang:
-                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+            tgt_lang_seq_forDec = tgt_lang_seq[sent_sort_idx] if opt.dec_lang else None
+            if opt.dec_tgtLang_oh:
+                tgt_lang_oneHot = model_translate.lang2oneHot(tgt_lang_seq, opt.tgtLangIdx2oneHotIdx)
+                tgt_lang_oneHot = tgt_lang_oneHot[sent_sort_idx]
             else:
-                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
+                tgt_lang_oneHot = None
+
+            all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq_forDec, tgt_lang_oneHot)
+            # if opt.dec_lang:
+            #     all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+            # else:
+            #     all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
 
             _, sent_revert_idx = sent_sort_idx.sort()
             sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
@@ -432,6 +440,12 @@ def load_model(opt):
         part_id=model_opt.part_id,
         enc_lang= model_opt.enc_lang,
         dec_lang=model_opt.dec_lang,
+        enc_srcLang_oh=opt.enc_srcLang_oh,
+        enc_tgtLang_oh=opt.enc_tgtLang_oh,
+        dec_tgtLang_oh=opt.dec_tgtLang_oh,
+        srcLangIdx2oneHotIdx=opt.srcLangIdx2oneHotIdx,
+        tgtLangIdx2oneHotIdx=opt.tgtLangIdx2oneHotIdx,
+        return_attn_output=model_opt.gan_attn_output,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -477,6 +491,29 @@ def load_model(opt):
             disc_optimizer.load_state_dict(checkpoint['disc_optimizer'])
 
         return modelRNN, optimizer, epoch_i, best_BLEU, disc, disc_optimizer
+
+def dict_lang(lang_data):
+    lang_token_idx = set()
+    #import ipdb; ipdb.set_trace()
+    for ii in lang_data:
+        lang_token_idx.add(ii[0])
+    list_lang_idx = list(lang_token_idx)
+    list_lang_idx.sort()
+
+    nb_lang = len(list_lang_idx)
+    langIdx2oneHotIdx = {}
+    for ii, idx in enumerate(list_lang_idx):
+        langIdx2oneHotIdx[idx] = ii
+    
+    return langIdx2oneHotIdx
+
+def nb_lang(lang_data):
+    lang_token_idx = set()
+    #import ipdb; ipdb.set_trace()
+    for ii in lang_data:
+        lang_token_idx.add(ii[0])
+    
+    return len(lang_token_idx)
 
 def main():
     ''' Main function '''
@@ -530,6 +567,10 @@ def main():
     parser.add_argument('-enc_lang', action='store_true')
     parser.add_argument('-dec_lang', action='store_true')
 
+    parser.add_argument('-enc_srcLang_oh', action='store_true')
+    parser.add_argument('-enc_tgtLang_oh', action='store_true')
+    parser.add_argument('-dec_tgtLang_oh', action='store_true')
+
     parser.add_argument('-part_id', action='store_true')
 
     parser.add_argument('-balanced_data', action='store_true')
@@ -553,7 +594,8 @@ def main():
     opt.cuda = not opt.no_cuda
     #opt.d_word_vec = opt.d_model
 
-    opt.target_lang = True if opt.enc_lang or opt.dec_lang else False
+    opt.target_lang = True if opt.enc_lang or opt.dec_lang or opt.dec_tgtLang_oh or opt.enc_tgtLang_oh else False
+    opt.source_lang = True if opt.enc_srcLang_oh else False
 
     #========= Loading Dataset =========#
     data = torch.load(opt.data)
@@ -601,6 +643,15 @@ def main():
     opt.src_vocab_size = training_data.src_vocab_size
     opt.tgt_vocab_size = training_data.tgt_vocab_size
 
+    opt.tgtLangIdx2oneHotIdx = dict_lang(data['train']['tgt_lang']) if opt.dec_tgtLang_oh or opt.enc_tgtLang_oh else {}
+
+    if opt.enc_srcLang_oh:
+        nb_src_lang = nb_lang(data['train']['src_lang'])
+        opt.srcLangIdx2oneHotIdx = {}
+        for ii in range(nb_src_lang):
+            opt.srcLangIdx2oneHotIdx[ii] = ii
+    else:
+        opt.srcLangIdx2oneHotIdx = {}
 
     #========= Preparing Model =========#
     if opt.embs_share_weight and training_data.src_word2idx != training_data.tgt_word2idx:
@@ -636,8 +687,13 @@ def main():
             part_id=opt.part_id,
             enc_lang=opt.enc_lang,
             dec_lang=opt.dec_lang,
-            cuda=opt.cuda,
-            return_attn_output=opt.gan_attn_output)
+            enc_srcLang_oh=opt.enc_srcLang_oh,
+            enc_tgtLang_oh=opt.enc_tgtLang_oh,
+            dec_tgtLang_oh=opt.dec_tgtLang_oh,
+            srcLangIdx2oneHotIdx=opt.srcLangIdx2oneHotIdx,
+            tgtLangIdx2oneHotIdx=opt.tgtLangIdx2oneHotIdx,
+            return_attn_output=opt.gan_attn_output,
+            cuda=opt.cuda)
 
         #print(modelRNN)
 
