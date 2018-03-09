@@ -274,7 +274,7 @@ class Decoder(nn.Module):
     def __init__(
              self, n_tgt_vocab, n_max_seq, n_layers=2,
              d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True, part_id=False, cuda=False,
-             return_enc_avg=False):
+             return_attn_output=False):
         super(Decoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -328,7 +328,7 @@ class Decoder(nn.Module):
         self.d_word_vec = d_word_vec
         self.n_max_seq = n_max_seq
         self.part_id = part_id
-        self.return_enc_avg = return_enc_avg
+        self.return_attn_output = return_attn_output
 
     def forward(self, h_in, h_in_len, y_in, l_in=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
@@ -370,6 +370,8 @@ class Decoder(nn.Module):
                 # (batch_size, x_seq_len, d_ctx)
 
         logits = []
+        if self.return_attn_output:
+            c_ts = Variable(self.tt.FloatTensor(batch_size, y_seq_len, 2*self.d_model).zero_())
         for idx in range(y_seq_len):
             ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, -1) \
                     # (batch_size, d_model * n_layers)
@@ -386,6 +388,9 @@ class Decoder(nn.Module):
 
             c_t = torch.mul( h_in, score ) # (batch_size, x_seq_len, d_ctx)
             c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
+            
+            if self.return_attn_output:
+                c_ts[:, idx] = c_t
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
             if self.part_id:
@@ -419,6 +424,8 @@ class Decoder(nn.Module):
             ans = ans[:,1:]
             ans = ans.contiguous()
             y_seq_len -= 1
+        if self.return_attn_output:
+            return ans.view(batch_size * y_seq_len, -1), c_ts
         return ans.view(batch_size * y_seq_len, -1)
 
     def greedy_search(self, h_in, h_in_len, l_in=None):
@@ -536,7 +543,8 @@ class NMTmodelRNN(nn.Module):
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
             share_enc_dec=False, part_id=False,
-            enc_lang=False, dec_lang=False, cuda=False):
+            enc_lang=False, dec_lang=False, cuda=False,
+            return_attn_output=False):
 
         self.n_layers = n_layers
 
@@ -546,7 +554,7 @@ class NMTmodelRNN(nn.Module):
             n_tgt_vocab, n_max_seq, n_layers=n_layers,
             d_word_vec=d_word_vec, d_model=d_model,
             dropout=dropout, no_proj_share_weight = no_proj_share_weight,
-            part_id=part_id, cuda=cuda, return_enc_avg=True)
+            part_id=part_id, cuda=cuda, return_attn_output=return_attn_output)
 
         if share_enc_dec:
             self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
@@ -568,7 +576,8 @@ class NMTmodelRNN(nn.Module):
             self.encoder.emb.weight = self.decoder.emb.weight
         self.enc_lang = enc_lang
         self.dec_lang = dec_lang
-
+        
+        self.return_attn_output = return_attn_output
 
     def forward(self, src, tgt, tgt_lang=None):
         # src_seq and src_pos: sent_len * batch_size
@@ -577,11 +586,12 @@ class NMTmodelRNN(nn.Module):
         if tgt_lang is not None:
             tgt_lang_seq, tgt_lang_pos = tgt_lang
 
+        lengths_seq_tgt, idx_tgt = tgt_pos.max(1)
+        lengths_seq_tgt = lengths_seq_tgt - 1 # Don't count EOS
         tgt_seq = tgt_seq[:, :-1]
         tgt_pos = tgt_pos[:, :-1]
         
         lengths_seq_src, idx_src = src_pos.max(1)
-        #lengths_seq_tgt, idx_tgt = tgt_pos.max(1)
 
         if self.enc_lang:
             enc_output = self.encoder(src_seq, lengths_seq_src, tgt_lang_seq)
@@ -593,7 +603,10 @@ class NMTmodelRNN(nn.Module):
         else:
             dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq)
 
+        c_ts = None
+        if self.return_attn_output:
+            dec_output, c_ts = dec_output
+
         #import ipdb; ipdb.set_trace()
 
-        
-        return dec_output, enc_output, lengths_seq_src
+        return dec_output, enc_output, lengths_seq_src, lengths_seq_tgt, c_ts

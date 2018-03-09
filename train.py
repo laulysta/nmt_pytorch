@@ -64,25 +64,35 @@ class MainModel(nn.Module):
     def forward(self, src, tgt, tgt_lang=None, src_lang=None):
         gold = tgt[0][:, 1:]
 
-        pred, enc_output, src_len = self.model(src, tgt, tgt_lang=tgt_lang)
+        pred, enc_output, src_len, tgt_len, c_ts = self.model(src, tgt, tgt_lang=tgt_lang)
 
         if self.opt.smoothing:
             pred = F.log_softmax(pred, dim=1)
 
         loss = get_loss(self.crit, pred, gold, self.opt)
         if self.disc:
+            sorted_tgt_len, argsort_tgt_len = None, None
             if self.opt.gan_every_step:
                 enc_hidden_states = torch.nn.utils.rnn.pack_padded_sequence(enc_output, src_len.data.view(-1).tolist(), batch_first=True)[0]
-            else:
+            if self.opt.gan_attn_output:
+                sorted_tgt_len, argsort_tgt_len = tgt_len.sort(descending=True)
+                sorted_c_ts = c_ts[argsort_tgt_len]
+                enc_hidden_states__ = torch.nn.utils.rnn.pack_padded_sequence(sorted_c_ts, sorted_tgt_len.data.view(-1).tolist(), batch_first=True)[0]
+                if self.opt.gan_every_step:
+                    enc_hidden_states = torch.cat([enc_hidden_states, enc_hidden_states__])
+                else:
+                    enc_hidden_states = enc_hidden_states__
+
+            if not (self.opt.gan_every_step or self.opt.gan_attn_output):
                 enc_hidden_states = torch.sum(enc_output, 1) # (batch_size, D_hid_enc * num_dir_enc)
                 enc_hidden_states = torch.div(enc_hidden_states, src_len.view(-1,1).float())
 
             enc_log_probs = self.disc.forward(enc_hidden_states) # n_states x n_langs
             neg_entropy = torch.sum(enc_log_probs * torch.exp(enc_log_probs))
             loss = (loss, neg_entropy)
-            return loss, pred, enc_log_probs, src_len
+            return loss, pred, enc_log_probs, src_len, sorted_tgt_len, argsort_tgt_len
 
-        return loss, pred, None, None
+        return loss, pred, None, None, None, None
 
 
 def train_epoch(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, nb_examples_seen, pct_next_save,
@@ -120,7 +130,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         # forward
         optimizer.zero_grad()
 
-        loss, pred, enc_log_probs, src_len = model(src, tgt,
+        loss, pred, enc_log_probs, src_len, sorted_tgt_len, argsort_tgt_len = model(src, tgt,
                 tgt_lang=tgt_lang if opt.target_lang else None,
                 src_lang=src_lang if training_data._src_langs else None)
 
@@ -148,9 +158,17 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
             disc_optimizer.zero_grad()
             if opt.gan_every_step:
                 disc_gold = torch.nn.utils.rnn.pack_padded_sequence(src_lang[0].repeat(1, src_len.data[0]), src_len.data.view(-1).tolist(), batch_first=True)[0]
-                disc_loss = disc_crit(enc_log_probs, disc_gold)
-            else:
-                disc_loss = disc_crit(enc_log_probs, src_lang[0][:,0])
+            if opt.gan_attn_output:
+                disc_gold__ = torch.nn.utils.rnn.pack_padded_sequence(src_lang[0][argsort_tgt_len].repeat(1, sorted_tgt_len.data[0]),
+                   sorted_tgt_len.data.view(-1).tolist(), batch_first=True)[0]
+                if opt.gan_every_step:
+                    disc_gold = torch.cat([disc_gold, disc_gold__])
+                else:
+                    disc_gold = disc_gold__
+
+            if not (opt.gan_every_step or opt.gan_attn_output):
+                disc_gold = src_lang[0][:,0]
+            disc_loss = disc_crit(enc_log_probs, disc_gold)
             disc_loss.backward()
             #print(disc_loss)
             #print('D: ', sum(param.sum() for param in disc.parameters()))
@@ -221,9 +239,9 @@ def eval_epoch(model, validation_data, crit, opt):
         # forward
 
         if opt.target_lang:
-            loss, pred, _, _ = model(src, tgt, tgt_lang=tgt_lang)
+            loss, pred, _, _, _, _ = model(src, tgt, tgt_lang=tgt_lang)
         else:
-            loss, pred, _, _ = model(src, tgt)
+            loss, pred, _, _, _, _ = model(src, tgt)
 
         # note keeping
         n_correct = get_performance(pred, gold)
@@ -513,6 +531,7 @@ def main():
             help='All discriminator dimensions (including input and output)')
     parser.add_argument('-gan_gen_coeff', type=float, default=1.)
     parser.add_argument('-gan_every_step', action='store_true')
+    parser.add_argument('-gan_attn_output', action='store_true')
 
     parser.add_argument('-extra_valid_src', type=str, nargs='+', help='Path extra valid source')
     parser.add_argument('-extra_valid_tgt', type=str, nargs='+', help='Path extra valid target')
@@ -608,7 +627,8 @@ def main():
             part_id=opt.part_id,
             enc_lang=opt.enc_lang,
             dec_lang=opt.dec_lang,
-            cuda=opt.cuda)
+            cuda=opt.cuda,
+            return_attn_output=opt.gan_attn_output)
 
         #print(modelRNN)
 
