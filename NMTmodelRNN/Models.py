@@ -543,8 +543,9 @@ class NMTmodelRNN(nn.Module):
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
             share_enc_dec=False, part_id=False,
-            enc_lang=False, dec_lang=False, cuda=False,
-            return_attn_output=False):
+            enc_lang=False, dec_lang=False, return_attn_output=False,
+            srcLangIdx2oneHotIdx=False, tgtLangIdx2oneHotIdx=False, cuda=False):
+
 
         self.n_layers = n_layers
 
@@ -576,8 +577,26 @@ class NMTmodelRNN(nn.Module):
             self.encoder.emb.weight = self.decoder.emb.weight
         self.enc_lang = enc_lang
         self.dec_lang = dec_lang
+
         
         self.return_attn_output = return_attn_output
+        self.srcLangIdx2oneHotIdx = srcLangIdx2oneHotIdx
+        self.tgtLangIdx2oneHotIdx = tgtLangIdx2oneHotIdx
+        self.tt = torch.cuda if cuda else torch
+
+    def lang2oneHot(self, lang_seq, langIdx2oneHotIdx):
+        oh = self.tt.FloatTensor(lang_seq.size()[0], len(langIdx2oneHotIdx)).zero_()
+        
+        lang_seq = lang_seq.data.tolist()
+        for ii, ll in enumerate(lang_seq):
+            idx = langIdx2oneHotIdx[ll[0]]
+            oh[ii][idx] = 1.0
+
+
+        #import ipdb; ipdb.set_trace()
+        oh = Variable(oh)
+
+        return oh
 
     def forward(self, src, tgt, tgt_lang=None):
         # src_seq and src_pos: sent_len * batch_size
