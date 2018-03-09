@@ -142,7 +142,7 @@ class EncoderFast(nn.Module):
 
 class Encoder(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
-                d_word_vec=512, d_model=512, dropout=0.5, share_enc_dec=False, part_id=False,
+                d_word_vec=512, d_model=512, dropout=0.5, share_enc_dec=False,
                 nb_lang_src=0, nb_lang_tgt=0, cuda=False):
         super(Encoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
@@ -162,7 +162,7 @@ class Encoder(nn.Module):
                         dropout=dropout,
                         batch_first=True,
                         bidirectional=False)
-            rnn_init_weights(self.rnn1, d_model, d_word_vec)
+            rnn_init_weights(self.rnn1, d_model, d_word_vec+nb_lang_src+nb_lang_tgt)
 
             self.rnn2 = nn.GRU(
                         input_size=d_word_vec+nb_lang_src+nb_lang_tgt,
@@ -171,7 +171,7 @@ class Encoder(nn.Module):
                         dropout=dropout,
                         batch_first=True,
                         bidirectional=False)
-            rnn_init_weights(self.rnn2, d_model, d_word_vec)
+            rnn_init_weights(self.rnn2, d_model, d_word_vec+nb_lang_src+nb_lang_tgt)
 
         self.share_enc_dec=share_enc_dec
         self.drop = nn.Dropout(p=dropout)
@@ -179,7 +179,6 @@ class Encoder(nn.Module):
         self.d_model = d_model
         self.tt = torch.cuda if cuda else torch
         self.d_ctx = d_ctx
-        self.part_id = part_id
 
     def forward(self, x_in, x_in_lens, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None):
         # x_in : (batch_size, x_seq_len)
@@ -196,6 +195,14 @@ class Encoder(nn.Module):
                                                     x_in_emb.size()[1], self.d_ctx).zero_() )
 
             x_in_emb = torch.cat((x_in_emb, pad_att), dim=2) 
+
+        if src_lang_oneHot is not None:
+            tmp = src_lang_oneHot[:,None,:].repeat(1,x_seq_len,1)
+            x_in_emb = torch.cat((tmp, x_in_emb), dim=2)
+
+        if tgt_lang_oneHot is not None:
+            tmp = tgt_lang_oneHot[:,None,:].repeat(1,x_seq_len,1)
+            x_in_emb = torch.cat((tmp, x_in_emb), dim=2)
 
         # Lengths data is wrapped inside a Variable.
         x_in_lens = x_in_lens.data.view(-1).tolist()
@@ -217,25 +224,6 @@ class Encoder(nn.Module):
             x_in_emb = torch.cat((l_in_emb, x_in_emb), dim=1) # (batch_size, x_seq_len+1, D_emb)
             x_in_emb_r = torch.cat((l_in_emb, x_in_emb_r), dim=1) # (batch_size, x_seq_len+1, D_emb)
             x_in_lens = [x+1 for x in x_in_lens]
-
-        if src_lang_oneHot is not None:
-            tmp = src_lang_oneHot[:,None,:].repeat(1,x_seq_len,1)
-            x_in_emb = torch.cat((tmp, x_in_emb), dim=2)
-
-        if tgt_lang_oneHot is not None:
-            tmp = tgt_lang_oneHot[:,None,:].repeat(1,x_seq_len,1)
-            x_in_emb = torch.cat((tmp, x_in_emb), dim=2)
-
-        if self.part_id:
-            part_rep_lr = Variable( self.tt.FloatTensor(x_in_emb.size()[0], \
-                                                        x_in_emb.size()[1], 3).zero_() )
-            part_rep_rl = Variable( self.tt.FloatTensor(x_in_emb.size()[0], \
-                                                        x_in_emb.size()[1], 3).zero_() )
-            part_rep_lr[:,:,0]=1.0
-            part_rep_rl[:,:,1]=1.0
-            x_in_emb = torch.cat((part_rep_lr, x_in_emb), dim=2)
-            x_in_emb_r = torch.cat((part_rep_rl, x_in_emb_r), dim=2)
-
 
         pack = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb, x_in_lens, batch_first=True)
         pack_r = torch.nn.utils.rnn.pack_padded_sequence(x_in_emb_r, x_in_lens, batch_first=True)
@@ -507,8 +495,6 @@ class Decoder(nn.Module):
 
                 y_in_emb = self.emb( Variable( ft ) ) # (batch_size, 1, d_word_vec)
                 s_tm1 = s_t
-                if self.part_id:
-                    y_in_emb_part = torch.cat((part_rep, y_in_emb), dim=2)
                 continue
 
             fin_y = self.y_to_fin( y_in_emb.view(batch_size, self.d_word_vec) ) # (batch_size, d_word_vec)
@@ -546,8 +532,8 @@ class NMTmodelRNN(nn.Module):
             self, n_src_vocab, n_tgt_vocab, n_max_seq, n_layers=2,
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
-            share_enc_dec=False, part_id=False,
-            enc_lang=False, dec_lang=False, dec_tgtLang_oh=False, return_attn_output=False,
+            share_enc_dec=False,
+            enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False, return_attn_output=False,
             srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, cuda=False):
 
 
@@ -565,14 +551,14 @@ class NMTmodelRNN(nn.Module):
             self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
                                     d_word_vec=d_word_vec, d_model=d_model,
                                     dropout=dropout, share_enc_dec=share_enc_dec,
-                                    part_id=part_id, cuda=cuda)
+                                    cuda=cuda)
             self.encoder.rnn1 = self.decoder.rnn
             self.encoder.rnn2 = self.decoder.rnn
         else:
             self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
                                     d_word_vec=d_word_vec, d_model=d_model,
-                                    dropout=dropout, part_id=part_id,
-                                    nb_lang_src=len(srcLangIdx2oneHotIdx, nb_lang_tgt=len(tgtLangIdx2oneHotIdx,
+                                    dropout=dropout,
+                                    nb_lang_src=len(srcLangIdx2oneHotIdx), nb_lang_tgt=len(tgtLangIdx2oneHotIdx),
                                     cuda=cuda)
 
         if embs_share_weight:
@@ -583,6 +569,8 @@ class NMTmodelRNN(nn.Module):
             self.encoder.emb.weight = self.decoder.emb.weight
         self.enc_lang = enc_lang
         self.dec_lang = dec_lang
+        self.enc_srcLang_oh = enc_srcLang_oh
+        self.enc_tgtLang_oh = enc_tgtLang_oh
         self.dec_tgtLang_oh = dec_tgtLang_oh
 
         

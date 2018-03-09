@@ -240,9 +240,15 @@ class DataLoader(object):
                 
                 if not self._tgt_insts:
                     if self._tgt_lang_insts:
-                        return (src_data, src_pos), (tgt_lang_data, tgt_lang_pos)
+                        if self._src_lang_insts:
+                            return (src_data, src_pos), (src_lang_data, src_lang_pos), (tgt_lang_data, tgt_lang_pos)
+                        else:
+                            return (src_data, src_pos), (tgt_lang_data, tgt_lang_pos)
                     else:
-                        return src_data, src_pos
+                        if self._src_lang_insts:
+                            return (src_data, src_pos), (src_lang_data, src_lang_pos)
+                        else:
+                            return src_data, src_pos
                 else:
                     tgt_insts = self._tgt_insts[start_idx:end_idx]
                     tgt_data, tgt_pos = pad_to_longest(tgt_insts)

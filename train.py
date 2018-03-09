@@ -64,7 +64,7 @@ class MainModel(nn.Module):
     def forward(self, src, tgt, tgt_lang=None, src_lang=None):
         gold = tgt[0][:, 1:]
 
-        pred, enc_output, src_len, tgt_len, c_ts = self.model(src, tgt, tgt_lang=tgt_lang)
+        pred, enc_output, src_len, tgt_len, c_ts = self.model(src, tgt, tgt_lang=tgt_lang, src_lang=src_lang)
 
         if self.opt.smoothing:
             pred = F.log_softmax(pred, dim=1)
@@ -119,11 +119,11 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         #print(training_data._starts)
         # prepare data
 
-        if opt.target_lang and training_data._src_langs:
+        if opt.target_lang and (opt.gan or opt.source_lang):
             src, tgt, src_lang, tgt_lang = batch
         elif opt.target_lang:
             src, tgt, tgt_lang = batch
-        elif training_data._src_langs:
+        elif opt.gan or opt.source_lang:
             src, tgt, src_lang = batch
         else:
             src, tgt = batch
@@ -133,7 +133,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
 
         loss, pred, enc_log_probs, src_len, sorted_tgt_len, argsort_tgt_len = model(src, tgt,
                 tgt_lang=tgt_lang if opt.target_lang else None,
-                src_lang=src_lang if training_data._src_langs else None)
+                src_lang=src_lang if opt.gan or opt.source_lang else None)
 
         if opt.gan:
             ce_loss, gen_loss = loss
@@ -237,20 +237,21 @@ def eval_epoch(model, validation_data, crit, opt):
             validation_data, mininterval=2,
             desc='  - (Validation) ', leave=False):
 
-
         # prepare data
-        if opt.target_lang:
+        # tgt always used here
+        if opt.target_lang and opt.source_lang:
+            src, tgt, src_lang, tgt_lang = batch
+        elif opt.target_lang:
             src, tgt, tgt_lang = batch
+        elif opt.source_lang:
+            src, tgt, src_lang = batch
         else:
             src, tgt = batch
         gold = tgt[0][:, 1:]
 
         # forward
 
-        if opt.target_lang:
-            loss, pred, _, _, _, _ = model(src, tgt, tgt_lang=tgt_lang)
-        else:
-            loss, pred, _, _, _, _ = model(src, tgt)
+        loss, pred, _, _, _, _ = model(src, tgt, tgt_lang=tgt_lang if opt.target_lang else None, src_lang=src_lang if opt.source_lang else None)
 
         # note keeping
         n_correct = get_performance(pred, gold)
@@ -308,28 +309,47 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
     with open(output_name, 'w') as f:
         for batch in tqdm(validation_data_translate, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
             #import ipdb; ipdb.set_trace()
-            if opt.target_lang:
-                (src_seq, src_pos), (tgt_lang_seq, tgt_lang_pos) = batch
+            # No tgt, not balanced
+            """
+            if opt.target_lang and opt.source_lang:
+                (src_seq, src_pos), (tgt_seq, tgt_pos), (src_lang_seq, src_lang_pos), (tgt_lang_seq, tgt_lang_pos) = batch
+            elif opt.target_lang:
+                (src_seq, src_pos), (tgt_seq, tgt_pos), (tgt_lang_seq, tgt_lang_pos) = batch
+            elif opt.source_lang:
+                (src_seq, src_pos), (tgt_seq, tgt_pos), (src_lang_seq, src_lang_pos) = batch
             else:
-                src_seq, src_pos  = batch
-            
+                (src_seq, src_pos), (tgt_seq, tgt_pos) = batch
+            """
+            if opt.target_lang and opt.source_lang:
+                (src_seq, src_pos), (src_lang_seq, src_lang_pos), (tgt_lang_seq, tgt_lang_pos) = batch
+            elif opt.target_lang:
+                (src_seq, src_pos), (tgt_lang_seq, tgt_lang_pos) = batch
+            elif opt.source_lang:
+                (src_seq, src_pos), (src_lang_seq, src_lang_pos) = batch
+            else:
+                (src_seq, src_pos) = batch
+
             lengths_seq_src, idx_src = src_pos.max(1)
 
             _, sent_sort_idx = lengths_seq_src.sort(descending=True)
 
-            if opt.enc_lang:
-                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
-            else:
-                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
+            tgt_lang_seq_forEnc = tgt_lang_seq[sent_sort_idx] if opt.enc_lang else None
+            src_lang_oneHot_forEnc = model_translate.lang2oneHot(src_lang_seq, opt.srcLangIdx2oneHotIdx)[sent_sort_idx] if opt.enc_srcLang_oh else None
+            tgt_lang_oneHot_forEnc = model_translate.lang2oneHot(tgt_lang_seq, opt.tgtLangIdx2oneHotIdx)[sent_sort_idx] if opt.enc_tgtLang_oh else None
+
+            enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx],
+                tgt_lang_seq_forEnc, src_lang_oneHot_forEnc, tgt_lang_oneHot_forEnc)
 
             tgt_lang_seq_forDec = tgt_lang_seq[sent_sort_idx] if opt.dec_lang else None
             if opt.dec_tgtLang_oh:
-                tgt_lang_oneHot = model_translate.lang2oneHot(tgt_lang_seq, opt.tgtLangIdx2oneHotIdx)
-                tgt_lang_oneHot = tgt_lang_oneHot[sent_sort_idx]
+                tgt_lang_oneHot_forDec = model_translate.lang2oneHot(tgt_lang_seq, opt.tgtLangIdx2oneHotIdx)
+                tgt_lang_oneHot_forDec = tgt_lang_oneHot_forDec[sent_sort_idx]
             else:
-                tgt_lang_oneHot = None
+                tgt_lang_oneHot_forDec = None
 
-            all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq_forDec, tgt_lang_oneHot)
+            all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq_forDec, tgt_lang_oneHot_forDec)
+            ###
+
             # if opt.dec_lang:
             #     all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
             # else:
@@ -437,7 +457,6 @@ def load_model(opt):
         n_layers=model_opt.n_layers,
         dropout=model_opt.dropout,
         share_enc_dec=model_opt.share_enc_dec,
-        part_id=model_opt.part_id,
         enc_lang= model_opt.enc_lang,
         dec_lang=model_opt.dec_lang,
         enc_srcLang_oh=opt.enc_srcLang_oh,
@@ -571,8 +590,6 @@ def main():
     parser.add_argument('-enc_tgtLang_oh', action='store_true')
     parser.add_argument('-dec_tgtLang_oh', action='store_true')
 
-    parser.add_argument('-part_id', action='store_true')
-
     parser.add_argument('-balanced_data', action='store_true')
 
     parser.add_argument('-gan', action='store_true')
@@ -609,7 +626,7 @@ def main():
         data['dict']['tgt'],
         src_insts=data['train']['src'],
         tgt_insts=data['train']['tgt'],
-        src_lang_insts=(data['train']['src_lang'] if opt.gan else None),
+        src_lang_insts=(data['train']['src_lang'] if opt.gan or opt.source_lang else None),
         tgt_lang_insts=(data['train']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.batch_size,
         cuda=opt.cuda,
@@ -621,6 +638,7 @@ def main():
         data['dict']['tgt'],
         src_insts=data['valid']['src'],
         tgt_insts=data['valid']['tgt'],
+        src_lang_insts=(data['valid']['src_lang'] if opt.source_lang else None),
         tgt_lang_insts=(data['valid']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.batch_size,
         shuffle=False,
@@ -633,6 +651,7 @@ def main():
         data['dict']['tgt'],
         src_insts=data['valid']['src'],
         tgt_insts=None,
+        src_lang_insts=(data['valid']['src_lang'] if opt.source_lang else None),
         tgt_lang_insts=(data['valid']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.batch_size,
         shuffle=False,
@@ -684,7 +703,6 @@ def main():
             n_layers=opt.n_layers,
             dropout=opt.dropout,
             share_enc_dec=opt.share_enc_dec,
-            part_id=opt.part_id,
             enc_lang=opt.enc_lang,
             dec_lang=opt.dec_lang,
             enc_srcLang_oh=opt.enc_srcLang_oh,
