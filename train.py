@@ -382,13 +382,16 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
         else:
             opt.extra_valid_tgtLang = [None] * len(opt.extra_valid_src)
 
-        for ii, (src_path, tgt_path, tgtLang_path) in enumerate(zip(opt.extra_valid_src, opt.extra_valid_tgt, opt.extra_valid_tgtLang)):
-            data_set = prepare_data(src_path, validation_data.src_word2idx, validation_data.tgt_word2idx, opt, tgtLang_path=tgtLang_path)
+        if opt.extra_valid_srcLang:
+            assert len(opt.extra_valid_src) == len(opt.extra_valid_srcLang)
+        else:
+            opt.extra_valid_srcLang = [None] * len(opt.extra_valid_src)
+
+        for ii, (src_path, tgt_path, srcLang_path, tgtLang_path) in enumerate(zip(opt.extra_valid_src, opt.extra_valid_tgt, opt.extra_valid_srcLang, opt.extra_valid_tgtLang)):
+            data_set = prepare_data(src_path, validation_data.src_word2idx, validation_data.tgt_word2idx, opt, srcLang_path=srcLang_path, tgtLang_path=tgtLang_path)
             extra_bleu_file_name = 'bleu_scores_extra' + str(ii+1) + '.txt'
             extra_output_name = output_name + '_extra' + str(ii+1)
-            translate_data(model_translate, data_set, extra_output_name, opt, tgt_path, bleu_file_name=extra_bleu_file_name, tgtLang=tgtLang_path)
-
-
+            translate_data(model_translate, data_set, extra_output_name, opt, tgt_path, bleu_file_name=extra_bleu_file_name)
 
     ###########################################################################################################################
 
@@ -592,9 +595,13 @@ def main():
 
     parser.add_argument('-extra_valid_src', type=str, nargs='+', help='Path extra valid source')
     parser.add_argument('-extra_valid_tgt', type=str, nargs='+', help='Path extra valid target')
+    parser.add_argument('-extra_valid_srcLang', type=str, nargs='+', help='Path extra valid source language')
     parser.add_argument('-extra_valid_tgtLang', type=str, nargs='+', help='Path extra valid target language')
     opt = parser.parse_args()
 
+    assert not (opt.dec_lang and opt.dec_tgtLang_oh)
+    assert not (opt.enc_lang and opt.enc_tgtLang_oh)
+    assert not (opt.enc_lang and opt.enc_srcLang_oh)
 
     if opt.save_freq_pct <= 0.0 or opt.save_freq_pct > 1.0:
         raise argparse.ArgumentTypeError("-save_freq_pct: %r not in range [0.0, 1.0]"%(opt.save_freq_pct,))

@@ -122,7 +122,7 @@ def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, srcLang_path=None, t
 
     return data_set
 
-def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_file_name='bleu_scores.txt', tgtLang='', srcLang=''):
+def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_file_name='bleu_scores.txt'):
     model_translate.eval()
     with open(output_name, 'w') as f:
         for batch in tqdm(data_set, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
@@ -235,7 +235,7 @@ def main():
     
     data_set = prepare_data(opt.val, src_word2idx, tgt_word2idx, opt, tgtLang_path=opt.val_tgtlang, srcLang_path=opt.val_srclang)
 
-    translate_data(model_translate, data_set, output_name, model_opt, opt.ref, tgtLang=opt.val_tgtlang, srcLang=opt.val_srclang)
+    translate_data(model_translate, data_set, output_name, model_opt, opt.ref)
 
 if __name__ == '__main__':
     main()
