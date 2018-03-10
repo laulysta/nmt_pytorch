@@ -310,16 +310,6 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
         for batch in tqdm(validation_data_translate, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
             #import ipdb; ipdb.set_trace()
             # No tgt, not balanced
-            """
-            if opt.target_lang and opt.source_lang:
-                (src_seq, src_pos), (tgt_seq, tgt_pos), (src_lang_seq, src_lang_pos), (tgt_lang_seq, tgt_lang_pos) = batch
-            elif opt.target_lang:
-                (src_seq, src_pos), (tgt_seq, tgt_pos), (tgt_lang_seq, tgt_lang_pos) = batch
-            elif opt.source_lang:
-                (src_seq, src_pos), (tgt_seq, tgt_pos), (src_lang_seq, src_lang_pos) = batch
-            else:
-                (src_seq, src_pos), (tgt_seq, tgt_pos) = batch
-            """
             if opt.target_lang and opt.source_lang:
                 (src_seq, src_pos), (src_lang_seq, src_lang_pos), (tgt_lang_seq, tgt_lang_pos) = batch
             elif opt.target_lang:

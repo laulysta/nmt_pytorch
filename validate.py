@@ -29,6 +29,19 @@ def load_model(opt):
         model_opt.enc_lang = True
         model_opt.dec_lang = False
 
+    if 'enc_srcLang_oh' not in checkpoint['settings']:
+        model_opt.enc_srcLang_oh = False
+    if 'enc_tgtLang_oh' not in checkpoint['settings']:
+        model_opt.enc_tgtLang_oh = False
+    if 'dec_tgtLang_oh' not in checkpoint['settings']:
+        model_opt.dec_tgtLang_oh = False
+    if 'srcLangIdx2oneHotIdx' not in checkpoint['settings']:
+        model_opt.srcLangIdx2oneHotIdx = {}
+    if 'tgtLangIdx2oneHotIdx' not in checkpoint['settings']:
+        model_opt.tgtLangIdx2oneHotIdx = {}
+    if 'return_attn_output' not in checkpoint['settings']:
+        model_opt.return_attn_output = False
+
     modelRNN = NMTmodelRNN(
         model_opt.src_vocab_size,
         model_opt.tgt_vocab_size,
@@ -40,9 +53,14 @@ def load_model(opt):
         n_layers=model_opt.n_layers,
         dropout=model_opt.dropout,
         share_enc_dec=model_opt.share_enc_dec,
-        part_id=model_opt.part_id,
         enc_lang= model_opt.enc_lang,
         dec_lang=model_opt.dec_lang,
+        enc_srcLang_oh=model_opt.enc_srcLang_oh,
+        enc_tgtLang_oh=model_opt.enc_tgtLang_oh,
+        dec_tgtLang_oh=model_opt.dec_tgtLang_oh,
+        srcLangIdx2oneHotIdx=model_opt.srcLangIdx2oneHotIdx,
+        tgtLangIdx2oneHotIdx=model_opt.tgtLangIdx2oneHotIdx,
+        return_attn_output=model_opt.gan_attn_output,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -57,6 +75,7 @@ def convert_instance_to_idx_seq(word_insts, word2idx):
 
 def read_instances_from_file(inst_file, target_lang=False, keep_case=True):
     ''' Convert file into word seq lists and vocab '''
+    # target_lang would also be True for a source language file.
     word_insts = []
     with open(inst_file) as f:
         for sent in f:
@@ -74,9 +93,13 @@ def read_instances_from_file(inst_file, target_lang=False, keep_case=True):
 
     return word_insts
 
-def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, tgtLang_path=None):
+def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, srcLang_path=None, tgtLang_path=None):
     valid_src_word_insts = read_instances_from_file(src_path)
     valid_src_insts = convert_instance_to_idx_seq(valid_src_word_insts, src_word2idx)
+
+    if srcLang_path:
+        valid_src_lang_word_insts = read_instances_from_file(srcLang_path, target_lang=True)
+        valid_src_lang_insts = convert_instance_to_idx_seq(valid_src_lang_word_insts, src_word2idx)
 
     if tgtLang_path:
         valid_tgt_lang_word_insts = read_instances_from_file(tgtLang_path, target_lang=True)
@@ -89,6 +112,7 @@ def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, tgtLang_path=None):
         tgt_word2idx,
         src_insts=valid_src_insts,
         tgt_insts=None,
+        src_lang_insts=(valid_src_lang_insts if srcLang_path else None),
         tgt_lang_insts=(valid_tgt_lang_insts if tgtLang_path else None),
         batch_size=opt.batch_size,
         shuffle=False,
@@ -98,35 +122,39 @@ def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, tgtLang_path=None):
 
     return data_set
 
-def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_file_name='bleu_scores.txt', tgtLang=''):
+def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_file_name='bleu_scores.txt', tgtLang='', srcLang=''):
     model_translate.eval()
     with open(output_name, 'w') as f:
         for batch in tqdm(data_set, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
             #import ipdb; ipdb.set_trace()
-            if tgtLang:
+            if model_opt.target_lang and model_opt.source_lang:
+                (src_seq, src_pos), (src_lang_seq, src_lang_pos), (tgt_lang_seq, tgt_lang_pos) = batch
+            elif model_opt.target_lang:
                 (src_seq, src_pos), (tgt_lang_seq, tgt_lang_pos) = batch
+            elif model_opt.source_lang:
+                (src_seq, src_pos), (src_lang_seq, src_lang_pos) = batch
             else:
-                src_seq, src_pos  = batch
-            
+                (src_seq, src_pos) = batch
+           
             lengths_seq_src, idx_src = src_pos.max(1)
 
             _, sent_sort_idx = lengths_seq_src.sort(descending=True)
 
-            # if tgtLang:
-            #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
-            # else:
-            #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
-            # all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
+            tgt_lang_seq_forEnc = tgt_lang_seq[sent_sort_idx] if model_opt.enc_lang else None
+            src_lang_oneHot_forEnc = model_translate.lang2oneHot(src_lang_seq, model_opt.srcLangIdx2oneHotIdx)[sent_sort_idx] if model_opt.enc_srcLang_oh else None
+            tgt_lang_oneHot_forEnc = model_translate.lang2oneHot(tgt_lang_seq, model_opt.tgtLangIdx2oneHotIdx)[sent_sort_idx] if model_opt.enc_tgtLang_oh else None
 
-            if tgtLang and model_opt.enc_lang:
-                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
-            else:
-                enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
+            enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx],
+                tgt_lang_seq_forEnc, src_lang_oneHot_forEnc, tgt_lang_oneHot_forEnc)
 
-            if tgtLang and model_opt.dec_lang:
-                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
+            tgt_lang_seq_forDec = tgt_lang_seq[sent_sort_idx] if model_opt.dec_lang else None
+            if model_opt.dec_tgtLang_oh:
+                tgt_lang_oneHot_forDec = model_translate.lang2oneHot(tgt_lang_seq, model_opt.tgtLangIdx2oneHotIdx)
+                tgt_lang_oneHot_forDec = tgt_lang_oneHot_forDec[sent_sort_idx]
             else:
-                all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
+                tgt_lang_oneHot_forDec = None
+
+            all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq_forDec, tgt_lang_oneHot_forDec)
 
             _, sent_revert_idx = sent_sort_idx.sort()
             sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
@@ -179,6 +207,8 @@ def main():
                         help='Path to the val data we want to translate')
     parser.add_argument('-val_tgtlang', type=str, default='',
                         help='Path to the tgtlang')
+    parser.add_argument('-val_srclang', type=str, default='',
+                        help='Path to the srclang')
 
     parser.add_argument('-batch_size', type=int, default=64)
     parser.add_argument('-no_cuda', action='store_true')
@@ -203,94 +233,9 @@ def main():
     data = torch.load(opt.data_dict)
     src_word2idx, tgt_word2idx = data['dict']['src'], data['dict']['tgt']
     
-    # valid_src_word_insts = read_instances_from_file(opt.val)
-    # valid_src_insts = convert_instance_to_idx_seq(valid_src_word_insts, src_word2idx)
+    data_set = prepare_data(opt.val, src_word2idx, tgt_word2idx, opt, tgtLang_path=opt.val_tgtlang, srcLang_path=opt.val_srclang)
 
-    # if opt.val_tgtlang:
-    #     valid_tgt_lang_word_insts = read_instances_from_file(opt.val_tgtlang, target_lang=True)
-    #     valid_tgt_lang_insts = convert_instance_to_idx_seq(valid_tgt_lang_word_insts, src_word2idx)
-
-    # #import ipdb; ipdb.set_trace()
-
-    # data_set = DataLoader(
-    #     src_word2idx,
-    #     tgt_word2idx,
-    #     src_insts=valid_src_insts,
-    #     tgt_insts=None,
-    #     tgt_lang_insts=(valid_tgt_lang_insts if opt.val_tgtlang else None),
-    #     batch_size=opt.batch_size,
-    #     shuffle=False,
-    #     cuda=opt.cuda,
-    #     is_train=False,
-    #     sort_by_length=False)
-
-    data_set = prepare_data(opt.val, src_word2idx, tgt_word2idx, opt, tgtLang_path=opt.val_tgtlang)
-
-    translate_data(model_translate, data_set, output_name, model_opt, opt.ref, tgtLang=opt.val_tgtlang)
-    ###########################################################################################
-    # model_translate.eval()
-    # with open(output_name, 'w') as f:
-    #     for batch in tqdm(data_set, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
-    #         #import ipdb; ipdb.set_trace()
-    #         if opt.val_tgtlang:
-    #             (src_seq, src_pos), (tgt_lang_seq, tgt_lang_pos) = batch
-    #         else:
-    #             src_seq, src_pos  = batch
-            
-    #         lengths_seq_src, idx_src = src_pos.max(1)
-
-    #         _, sent_sort_idx = lengths_seq_src.sort(descending=True)
-
-    #         # if opt.val_tgtlang:
-    #         #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
-    #         # else:
-    #         #     enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
-    #         # all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
-
-    #         if opt.val_tgtlang and model_opt.enc_lang:
-    #             enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
-    #         else:
-    #             enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx])
-
-    #         if opt.val_tgtlang and model_opt.dec_lang:
-    #             all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
-    #         else:
-    #             all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
-
-    #         _, sent_revert_idx = sent_sort_idx.sort()
-    #         sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
-    #         all_hyp = np.array(all_hyp)
-    #         all_hyp = all_hyp[sent_revert_idx]
-
-    #         #import ipdb; ipdb.set_trace()
-    #         for idx_seq in all_hyp:
-    #             if len(idx_seq) > 0: 
-    #                 if idx_seq[-1] == Constants.EOS: # if last word is EOS
-    #                     idx_seq = idx_seq[:-1]
-    #                 pred_line = ' '.join([data_set.tgt_idx2word[idx] for idx in idx_seq])
-    #                 f.write(pred_line + '\n')
-    #             else:
-    #                 f.write('\n')
-    # try:
-    #     #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
-    #     out = subprocess.check_output("perl multi-bleu.perl " + opt.ref + " < " + output_name, shell=True)
-    #     out = out.decode() # because out is binary
-    #     valid_BLEU = float(out.strip().split()[2][:-1])
-    # except:
-    #     out = "multi-bleu.perl error"
-    #     valid_BLEU = -1.0
-
-    # #print(out)
-    # #import ipdb; ipdb.set_trace()
-    # bleu_file = os.path.dirname(output_name) + '/bleu_scores.txt'
-    # with open(bleu_file, 'a') as f:
-    #     #f.write("Epoch "+str(epoch_i)+": "+out)
-    #     f.write("Result : {out}".format(out=out))
-    # print("Result : {out}".format(out=out))
-    # print('Best BLEU valid (greedy, epoch{epoch:3.2f}): {best_BLEU}'.format(epoch=epoch_i, best_BLEU=best_BLEU))
-
-
-
+    translate_data(model_translate, data_set, output_name, model_opt, opt.ref, tgtLang=opt.val_tgtlang, srcLang=opt.val_srclang)
 
 if __name__ == '__main__':
     main()
