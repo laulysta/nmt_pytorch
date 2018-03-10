@@ -183,6 +183,7 @@ class Encoder(nn.Module):
     def forward(self, x_in, x_in_lens, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None):
         # x_in : (batch_size, x_seq_len)
         # x_in_lens : (batch_size)
+
         batch_size, x_seq_len = x_in.size()
 
         h_0 = Variable( self.tt.FloatTensor(self.n_layers, \
@@ -545,7 +546,7 @@ class NMTmodelRNN(nn.Module):
             n_tgt_vocab, n_max_seq, n_layers=n_layers,
             d_word_vec=d_word_vec, d_model=d_model,
             dropout=dropout, no_proj_share_weight = no_proj_share_weight,
-            cuda=cuda, nb_lang_tgt=len(tgtLangIdx2oneHotIdx), return_attn_output=return_attn_output)
+            cuda=cuda, nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*dec_tgtLang_oh, return_attn_output=return_attn_output)
 
         if share_enc_dec:
             self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
@@ -558,7 +559,8 @@ class NMTmodelRNN(nn.Module):
             self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
                                     d_word_vec=d_word_vec, d_model=d_model,
                                     dropout=dropout,
-                                    nb_lang_src=len(srcLangIdx2oneHotIdx), nb_lang_tgt=len(tgtLangIdx2oneHotIdx),
+                                    nb_lang_src=len(srcLangIdx2oneHotIdx)*enc_srcLang_oh,
+                                    nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*enc_tgtLang_oh,
                                     cuda=cuda)
 
         if embs_share_weight:
