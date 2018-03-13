@@ -142,12 +142,12 @@ class UniversalEncoder(nn.Module):
         return c_t
 
 class EncoderFast(nn.Module):
-    def __init__(self, n_src_vocab, n_max_seq, n_layers=2,
+    def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
                 d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
-        super(Encoder, self).__init__()
+        super(EncoderFast, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
-
+        #import ipdb; ipdb.set_trace()
         self.emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
         emb_init_weights(self.emb, n_src_vocab, d_word_vec)
 
@@ -165,7 +165,7 @@ class EncoderFast(nn.Module):
         self.d_model = d_model
         self.tt = torch.cuda if cuda else torch
 
-    def forward(self, x_in, x_in_lens, l_in=None):
+    def forward(self, x_in, x_in_lens, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None):
         # x_in : (batch_size, x_seq_len)
         # x_in_lens : (batch_size)
         batch_size, x_seq_len = x_in.size()
@@ -577,12 +577,18 @@ class NMTmodelRNN(nn.Module):
             cuda=cuda, nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*dec_tgtLang_oh)
 
         
-        self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
-                                d_word_vec=d_word_vec, d_model=d_model,
-                                dropout=dropout,
-                                nb_lang_src=len(srcLangIdx2oneHotIdx)*enc_srcLang_oh,
-                                nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*enc_tgtLang_oh,
-                                cuda=cuda)
+        # self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
+        #                         d_word_vec=d_word_vec, d_model=d_model,
+        #                         dropout=dropout,
+        #                         nb_lang_src=len(srcLangIdx2oneHotIdx)*enc_srcLang_oh,
+        #                         nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*enc_tgtLang_oh,
+        #                         cuda=cuda)
+
+        assert not (enc_srcLang_oh or enc_tgtLang_oh), "Not implemented"
+        self.encoder = EncoderFast(n_src_vocab, n_max_seq,
+                                    d_word_vec=d_word_vec, d_model=d_model,
+                                    dropout=dropout, cuda=cuda)
+
         if uni_steps:
             self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps)
 
