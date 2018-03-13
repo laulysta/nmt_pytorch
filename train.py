@@ -54,49 +54,26 @@ def get_performance(pred, gold):
 
 #g_n_correct = 0
 class MainModel(nn.Module):
-    def __init__(self, model, crit, opt, disc=None):
+    def __init__(self, model, crit, opt):
         super(MainModel, self).__init__()
         self.model = model
         self.crit = crit
         self.opt = opt
-        self.disc = disc
 
     def forward(self, src, tgt, tgt_lang=None, src_lang=None):
         gold = tgt[0][:, 1:]
 
-        pred, enc_output, src_len, tgt_len, c_ts = self.model(src, tgt, tgt_lang=tgt_lang, src_lang=src_lang)
+        pred = self.model(src, tgt, tgt_lang=tgt_lang, src_lang=src_lang)
 
         if self.opt.smoothing:
             pred = F.log_softmax(pred, dim=1)
 
         loss = get_loss(self.crit, pred, gold, self.opt)
-        if self.disc:
-            sorted_tgt_len, argsort_tgt_len = None, None
-            if self.opt.gan_every_step:
-                enc_hidden_states = torch.nn.utils.rnn.pack_padded_sequence(enc_output, src_len.data.view(-1).tolist(), batch_first=True)[0]
-            if self.opt.gan_attn_output:
-                sorted_tgt_len, argsort_tgt_len = tgt_len.sort(descending=True)
-                sorted_c_ts = c_ts[argsort_tgt_len]
-                enc_hidden_states__ = torch.nn.utils.rnn.pack_padded_sequence(sorted_c_ts, sorted_tgt_len.data.view(-1).tolist(), batch_first=True)[0]
-                if self.opt.gan_every_step:
-                    enc_hidden_states = torch.cat([enc_hidden_states, enc_hidden_states__])
-                else:
-                    enc_hidden_states = enc_hidden_states__
 
-            if not (self.opt.gan_every_step or self.opt.gan_attn_output):
-                enc_hidden_states = torch.sum(enc_output, 1) # (batch_size, D_hid_enc * num_dir_enc)
-                enc_hidden_states = torch.div(enc_hidden_states, src_len.view(-1,1).float())
-
-            enc_log_probs = self.disc.forward(enc_hidden_states) # n_states x n_langs
-            neg_entropy = torch.sum(enc_log_probs * torch.exp(enc_log_probs))
-            loss = (loss, neg_entropy)
-            return loss, pred, enc_log_probs, src_len, sorted_tgt_len, argsort_tgt_len
-
-        return loss, pred, None, None, None, None
+        return loss, pred
 
 
-def train_epoch(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, nb_examples_seen, pct_next_save,
-        disc=None, disc_crit=None, disc_optimizer=None):
+def train_epoch(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, nb_examples_seen, pct_next_save):
     ''' Epoch operation in training phase'''
 
     start = time.time()
@@ -108,8 +85,6 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
     n_total_words = 0
     n_total_correct = 0
 
-    total_gen_loss = 0
-    total_disc_loss = 0
     init_nb_examples_seen = nb_examples_seen
 
     nb_examples_save = training_data.nb_examples*pct_next_save
@@ -119,11 +94,11 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         #print(training_data._starts)
         # prepare data
 
-        if opt.target_lang and (opt.gan or opt.source_lang):
+        if opt.target_lang and opt.source_lang:
             src, tgt, src_lang, tgt_lang = batch
         elif opt.target_lang:
             src, tgt, tgt_lang = batch
-        elif opt.gan or opt.source_lang:
+        elif opt.source_lang:
             src, tgt, src_lang = batch
         else:
             src, tgt = batch
@@ -131,20 +106,16 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         # forward
         optimizer.zero_grad()
 
-        loss, pred, enc_log_probs, src_len, sorted_tgt_len, argsort_tgt_len = model(src, tgt,
+        loss, pred = model(src, tgt,
                 tgt_lang=tgt_lang if opt.target_lang else None,
-                src_lang=src_lang if opt.gan or opt.source_lang else None)
+                src_lang=src_lang if opt.source_lang else None)
 
-        if opt.gan:
-            ce_loss, gen_loss = loss
-            loss = ce_loss + opt.gan_gen_coeff * gen_loss
-        else:
-            ce_loss = loss
+        ce_loss = loss
 
         if opt.multi_gpu:
-            loss.backward(torch.ones_like(loss.data), retain_graph=True)
+            loss.backward(torch.ones_like(loss.data))
         else:
-            loss.backward(retain_graph=True) # Retain graph for disc_optimizer.backward
+            loss.backward()
 
         # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs/LSTMs.
         nn.utils.clip_grad_norm(model.parameters(), 1.0)
@@ -155,27 +126,6 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         if opt.sch_optim:
             optimizer.update_learning_rate()
 
-        if opt.gan:
-            disc_optimizer.zero_grad()
-            if opt.gan_every_step:
-                disc_gold = torch.nn.utils.rnn.pack_padded_sequence(src_lang[0].repeat(1, src_len.data[0]), src_len.data.view(-1).tolist(), batch_first=True)[0]
-            if opt.gan_attn_output:
-                disc_gold__ = torch.nn.utils.rnn.pack_padded_sequence(src_lang[0][argsort_tgt_len].repeat(1, sorted_tgt_len.data[0]),
-                   sorted_tgt_len.data.view(-1).tolist(), batch_first=True)[0]
-                if opt.gan_every_step:
-                    disc_gold = torch.cat([disc_gold, disc_gold__])
-                else:
-                    disc_gold = disc_gold__
-
-            if not (opt.gan_every_step or opt.gan_attn_output):
-                disc_gold = src_lang[0][:,0]
-            disc_loss = disc_crit(enc_log_probs, disc_gold)
-            disc_loss.backward()
-            #print(disc_loss)
-            #print('D: ', sum(param.sum() for param in disc.parameters()))
-            disc_optimizer.step()
-            if opt.sch_optim:
-                disc_optimizer.update_learning_rate()
 
         # note keeping
         gold = tgt[0][:, 1:]
@@ -187,42 +137,21 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
 
         n_total_src_words += src[0].data.ne(Constants.PAD).sum()
 
-        if opt.gan:
-            total_gen_loss += gen_loss.data[0]
-            total_disc_loss += disc_loss.data[0]
 
         nb_examples_seen += len(src[0]) # batch size
         if opt.save_model and nb_examples_seen >= nb_examples_save:
-            if opt.gan:
-                if opt.gan_every_step or opt.gan_attn_output:
-                    gan_examples = n_total_src_words * opt.gan_every_step + n_total_words * opt.gan_attn_output
-                else:
-                    gan_examples = nb_examples_seen - init_nb_examples_seen
-                print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, exp(gen loss): {exp_gen_loss:8.5F}, disc ppl: {disc_ppl:8.5F}, '\
-                  'elapse: {elapse:3.3f} min'.format(
-                      ppl=math.exp(min(total_loss/n_total_words, 100)), accu=100*n_total_correct/n_total_words,
-                      exp_gen_loss=math.exp(min(total_gen_loss/gan_examples, 100)),
-                      disc_ppl=math.exp(min(total_disc_loss/gan_examples, 100)),
-                      elapse=(time.time()-start)/60))
-            else:
-                print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
-                  'elapse: {elapse:3.3f} min'.format(
-                      ppl=math.exp(min(total_loss/n_total_words, 100)), accu=100*n_total_correct/n_total_words,
-                      elapse=(time.time()-start)/60))
+            print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
+              'elapse: {elapse:3.3f} min'.format(
+                  ppl=math.exp(min(total_loss/n_total_words, 100)), accu=100*n_total_correct/n_total_words,
+                  elapse=(time.time()-start)/60))
 
             pct_next_save += opt.save_freq_pct
             nb_examples_save = training_data.nb_examples*pct_next_save
             epoch_i += opt.save_freq_pct
-            best_BLEU = save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU,
-                    disc=disc, disc_optimizer=disc_optimizer)
+            best_BLEU = save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU)
             model.train()
 
-    if opt.gan_every_step or opt.gan_attn_output:
-        gan_examples = n_total_src_words * opt.gan_every_step + n_total_words * opt.gan_attn_output
-    else:
-        gan_examples = nb_examples_seen - init_nb_examples_seen
-    return total_loss/n_total_words, n_total_correct/n_total_words, epoch_i, best_BLEU, nb_examples_seen, pct_next_save, \
-            total_gen_loss/gan_examples, total_disc_loss/gan_examples
+    return total_loss/n_total_words, n_total_correct/n_total_words, epoch_i, best_BLEU, nb_examples_seen, pct_next_save
 
 def eval_epoch(model, validation_data, crit, opt):
     ''' Epoch operation in evaluation phase '''
@@ -251,22 +180,18 @@ def eval_epoch(model, validation_data, crit, opt):
 
         # forward
 
-        loss, pred, _, _, _, _ = model(src, tgt, tgt_lang=tgt_lang if opt.target_lang else None, src_lang=src_lang if opt.source_lang else None)
+        loss, pred = model(src, tgt, tgt_lang=tgt_lang if opt.target_lang else None, src_lang=src_lang if opt.source_lang else None)
 
         # note keeping
         n_correct = get_performance(pred, gold)
         n_words = gold.data.ne(Constants.PAD).sum()
         n_total_words += n_words
         n_total_correct += n_correct
-        if opt.gan:
-            total_loss += loss[0].data[0]
-        else:
-            total_loss += loss.data[0]
+        total_loss += loss.data[0]
 
     return total_loss/n_total_words, n_total_correct/n_total_words
 
-def train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU,
-     disc=None, disc_crit=None, disc_optimizer=None):
+def train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU):
     ''' Start training '''
 
     nb_examples_seen = 0
@@ -276,10 +201,9 @@ def train(model, training_data, validation_data, validation_data_translate, crit
     for ii in range(opt.epoch):
         print('[ Starting epoch', epoch_i+1, ']')
 
-        train_loss, train_accu, epoch_i, best_BLEU, nb_examples_seen, pct_next_save, gen_loss, disc_loss = train_epoch(model, training_data, validation_data,
+        train_loss, train_accu, epoch_i, best_BLEU, nb_examples_seen, pct_next_save = train_epoch(model, training_data, validation_data,
                                                                                         validation_data_translate, crit, optimizer, opt,
-                                                                                        epoch_i, best_BLEU, nb_examples_seen, pct_next_save,
-                                                                                        disc=disc, disc_crit=disc_crit, disc_optimizer=disc_optimizer)
+                                                                                        epoch_i, best_BLEU, nb_examples_seen, pct_next_save)
         start = time.time()
         valid_loss, valid_accu = eval_epoch(model, validation_data, crit, opt)
         print('  - (Validation) ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
@@ -290,8 +214,7 @@ def train(model, training_data, validation_data, validation_data_translate, crit
         valid_accus += [valid_accu]
 
 
-def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU, valid_accu=None, valid_accus=None,
-        disc=None, disc_optimizer=None):
+def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU, valid_accu=None, valid_accus=None):
     print('[ Epoch', epoch_i, ']')
     model.eval()
 
@@ -400,24 +323,12 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
     else:
         model_state_dict = model.model.state_dict()
     optimizer_state_dict = optimizer.state_dict()
-    if opt.gan:
-        disc_state_dict = disc.state_dict()
-        disc_optimizer_state_dict = disc_optimizer.state_dict()
-        checkpoint = {
-            'model': model_state_dict,
-            'optimizer': optimizer_state_dict,
-            'settings': opt,
-            'epoch': epoch_i,
-            'best_BLEU': valid_BLEU if valid_BLEU >= best_BLEU else best_BLEU,
-            'disc': disc_state_dict,
-            'disc_optimizer': disc_optimizer_state_dict}
-    else:
-        checkpoint = {
-            'model': model_state_dict,
-            'optimizer': optimizer_state_dict,
-            'settings': opt,
-            'epoch': epoch_i,
-            'best_BLEU': valid_BLEU if valid_BLEU >= best_BLEU else best_BLEU}
+    checkpoint = {
+        'model': model_state_dict,
+        'optimizer': optimizer_state_dict,
+        'settings': opt,
+        'epoch': epoch_i,
+        'best_BLEU': valid_BLEU if valid_BLEU >= best_BLEU else best_BLEU}
 
     torch.save(checkpoint, opt.save_model + '_tmp.chkpt')
     _ = subprocess.check_output('mv ' + opt.save_model + '_tmp.chkpt' + ' ' + opt.save_model + '.chkpt', shell=True)
@@ -449,7 +360,6 @@ def load_model(opt):
         d_word_vec=model_opt.d_word_vec,
         n_layers=model_opt.n_layers,
         dropout=model_opt.dropout,
-        share_enc_dec=model_opt.share_enc_dec,
         enc_lang= model_opt.enc_lang,
         dec_lang=model_opt.dec_lang,
         enc_srcLang_oh=opt.enc_srcLang_oh,
@@ -457,7 +367,6 @@ def load_model(opt):
         dec_tgtLang_oh=opt.dec_tgtLang_oh,
         srcLangIdx2oneHotIdx=opt.srcLangIdx2oneHotIdx,
         tgtLangIdx2oneHotIdx=opt.tgtLangIdx2oneHotIdx,
-        return_attn_output=model_opt.gan_attn_output,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -477,32 +386,8 @@ def load_model(opt):
     if not opt.no_reload_optimizer:
         optimizer.load_state_dict(checkpoint['optimizer'])
 
-    if not opt.gan:
-        return modelRNN, optimizer, epoch_i, best_BLEU
-    else:
-        module_list = []
-        for jj, in_dim in enumerate(opt.gan_dims[:-1]):
-            if opt.gan_dropout:
-                module_list.append(nn.Dropout(p=opt.gan_dropout))
-            module_list.append(nn.Linear(in_dim, opt.gan_dims[jj+1]))
-            module_list.append(nn.Tanh()) if jj < len(opt.gan_dims) - 2 else module_list.append(nn.LogSoftmax())
-        disc = nn.Sequential(*module_list)
-
-        disc.load_state_dict(checkpoint['disc'])
-
-        if opt.optim == 'adadelta':
-            disc_optimizer = optim.Adadelta(disc.parameters(),
-                                        lr=1.0, rho=0.95, eps=1e-06, weight_decay=0)
-        elif opt.optim == 'adam':
-            disc_optimizer = optim.Adam(disc.parameters(),
-                                    lr=opt.lr, betas=(0.9, 0.98), eps=1e-09)
-        else:
-            sys.exit('Wrong optimizer')
-
-        if not opt.no_reload_optimizer:
-            disc_optimizer.load_state_dict(checkpoint['disc_optimizer'])
-
-        return modelRNN, optimizer, epoch_i, best_BLEU, disc, disc_optimizer
+    return modelRNN, optimizer, epoch_i, best_BLEU
+    
 
 def dict_lang(lang_data):
     lang_token_idx = set()
@@ -574,8 +459,6 @@ def main():
     parser.add_argument('-external_validation_script', type=str, default=None, metavar='PATH', nargs='*',
                          help="location of validation script (to run your favorite metric for validation) (default: %(default)s)")
 
-    parser.add_argument('-share_enc_dec', action='store_true')
-
     parser.add_argument('-enc_lang', action='store_true')
     parser.add_argument('-dec_lang', action='store_true')
 
@@ -584,14 +467,6 @@ def main():
     parser.add_argument('-dec_tgtLang_oh', action='store_true')
 
     parser.add_argument('-balanced_data', action='store_true')
-
-    parser.add_argument('-gan', action='store_true')
-    parser.add_argument('-gan_dropout', type=float, default=0.)
-    parser.add_argument('-gan_dims', type=int, nargs='*',
-            help='All discriminator dimensions (including input and output)')
-    parser.add_argument('-gan_gen_coeff', type=float, default=1.)
-    parser.add_argument('-gan_every_step', action='store_true')
-    parser.add_argument('-gan_attn_output', action='store_true')
 
     parser.add_argument('-extra_valid_src', type=str, nargs='+', help='Path extra valid source')
     parser.add_argument('-extra_valid_tgt', type=str, nargs='+', help='Path extra valid target')
@@ -623,7 +498,7 @@ def main():
         data['dict']['tgt'],
         src_insts=data['train']['src'],
         tgt_insts=data['train']['tgt'],
-        src_lang_insts=(data['train']['src_lang'] if opt.gan or opt.source_lang else None),
+        src_lang_insts=(data['train']['src_lang'] if opt.source_lang else None),
         tgt_lang_insts=(data['train']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.batch_size,
         cuda=opt.cuda,
@@ -680,10 +555,7 @@ def main():
     pathlib.Path(opt.save_model).parent.mkdir(parents=True, exist_ok=True)
 
     if not opt.no_reload and (os.path.isfile(opt.save_model+".chkpt") or os.path.isfile(opt.reload_model+".chkpt")):
-        if opt.gan:
-            modelRNN, optimizer, epoch_i, best_BLEU, disc, disc_optimizer = load_model(opt)
-        else:
-            modelRNN, optimizer, epoch_i, best_BLEU = load_model(opt)
+        modelRNN, optimizer, epoch_i, best_BLEU = load_model(opt)
     else:
         #Create model
         epoch_i = 0.0
@@ -699,7 +571,6 @@ def main():
             d_word_vec=opt.d_word_vec,
             n_layers=opt.n_layers,
             dropout=opt.dropout,
-            share_enc_dec=opt.share_enc_dec,
             enc_lang=opt.enc_lang,
             dec_lang=opt.dec_lang,
             enc_srcLang_oh=opt.enc_srcLang_oh,
@@ -707,7 +578,6 @@ def main():
             dec_tgtLang_oh=opt.dec_tgtLang_oh,
             srcLangIdx2oneHotIdx=opt.srcLangIdx2oneHotIdx,
             tgtLangIdx2oneHotIdx=opt.tgtLangIdx2oneHotIdx,
-            return_attn_output=opt.gan_attn_output,
             cuda=opt.cuda)
 
         #print(modelRNN)
@@ -726,26 +596,6 @@ def main():
         if opt.sch_optim:
             optimizer = ScheduledOptim(optimizer, opt.d_model, opt.n_warmup_steps)
 
-        if opt.gan:
-            module_list = []
-            for jj, in_dim in enumerate(opt.gan_dims[:-1]):
-                if opt.gan_dropout:
-                    module_list.append(nn.Dropout(p=opt.gan_dropout))
-                module_list.append(nn.Linear(in_dim, opt.gan_dims[jj+1]))
-                module_list.append(nn.Tanh()) if jj < len(opt.gan_dims) - 2 else module_list.append(nn.LogSoftmax())
-            disc = nn.Sequential(*module_list)
-
-            if opt.optim == 'adadelta':
-                disc_optimizer = optim.Adadelta(disc.parameters(),
-                                            lr=1.0, rho=0.95, eps=1e-06, weight_decay=0)
-            elif opt.optim == 'adam':
-                disc_optimizer = optim.Adam(disc.parameters(),
-                                        lr=opt.lr, betas=(0.9, 0.98), eps=1e-09)
-            else:
-                sys.exit('Wrong optimizer')
-
-            if opt.sch_optim:
-                disc_optimizer = ScheduledOptim(disc_optimizer, opt.d_model, opt.n_warmup_steps)
 
     def get_criterion(vocab_size):
         ''' With PAD token zero weight '''
@@ -757,23 +607,16 @@ def main():
             return nn.CrossEntropyLoss(weight, size_average=False, ignore_index=Constants.PAD)
 
     crit = get_criterion(training_data.tgt_vocab_size)
-    if opt.gan:
-        disc_crit = nn.NLLLoss(size_average=False)
+    
     if opt.cuda:
         modelRNN = modelRNN.cuda()
         crit = crit.cuda()
-        if opt.gan:
-            disc = disc.cuda()
-            disc_crit = disc_crit.cuda()
 
-    model = MainModel(modelRNN, crit, opt, disc if opt.gan else None)
+    model = MainModel(modelRNN, crit, opt)
     if opt.multi_gpu:
         model = nn.DataParallel(model)
 
-    train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU,
-         disc=disc if opt.gan else None,
-         disc_crit=disc_crit if opt.gan else None,
-         disc_optimizer=disc_optimizer if opt.gan else None)
+    train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU)
 
 if __name__ == '__main__':
     main()

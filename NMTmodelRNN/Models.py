@@ -142,7 +142,7 @@ class EncoderFast(nn.Module):
 
 class Encoder(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
-                d_word_vec=512, d_model=512, dropout=0.5, share_enc_dec=False,
+                d_word_vec=512, d_model=512, dropout=0.5,
                 nb_lang_src=0, nb_lang_tgt=0, cuda=False):
         super(Encoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
@@ -150,30 +150,25 @@ class Encoder(nn.Module):
 
         self.emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
         emb_init_weights(self.emb, n_src_vocab, d_word_vec)
+        
+        self.rnn1 = nn.GRU(
+                    input_size=d_word_vec+nb_lang_src+nb_lang_tgt,
+                    hidden_size=d_model,
+                    num_layers=n_layers,
+                    dropout=dropout,
+                    batch_first=True,
+                    bidirectional=False)
+        rnn_init_weights(self.rnn1, d_model, d_word_vec+nb_lang_src+nb_lang_tgt)
 
-        if share_enc_dec:
-            self.rnn1 = None
-            self.rnn2 = None
-        else:
-            self.rnn1 = nn.GRU(
-                        input_size=d_word_vec+nb_lang_src+nb_lang_tgt,
-                        hidden_size=d_model,
-                        num_layers=n_layers,
-                        dropout=dropout,
-                        batch_first=True,
-                        bidirectional=False)
-            rnn_init_weights(self.rnn1, d_model, d_word_vec+nb_lang_src+nb_lang_tgt)
+        self.rnn2 = nn.GRU(
+                    input_size=d_word_vec+nb_lang_src+nb_lang_tgt,
+                    hidden_size=d_model,
+                    num_layers=n_layers,
+                    dropout=dropout,
+                    batch_first=True,
+                    bidirectional=False)
+        rnn_init_weights(self.rnn2, d_model, d_word_vec+nb_lang_src+nb_lang_tgt)
 
-            self.rnn2 = nn.GRU(
-                        input_size=d_word_vec+nb_lang_src+nb_lang_tgt,
-                        hidden_size=d_model,
-                        num_layers=n_layers,
-                        dropout=dropout,
-                        batch_first=True,
-                        bidirectional=False)
-            rnn_init_weights(self.rnn2, d_model, d_word_vec+nb_lang_src+nb_lang_tgt)
-
-        self.share_enc_dec=share_enc_dec
         self.drop = nn.Dropout(p=dropout)
         self.n_layers = n_layers
         self.d_model = d_model
@@ -191,11 +186,6 @@ class Encoder(nn.Module):
         
         x_in_emb = self.emb(x_in) # (batch_size, x_seq_len, D_emb)
         x_in_emb = self.drop(x_in_emb)
-        if self.share_enc_dec:
-            pad_att = Variable( self.tt.FloatTensor(x_in_emb.size()[0], \
-                                                    x_in_emb.size()[1], self.d_ctx).zero_() )
-
-            x_in_emb = torch.cat((x_in_emb, pad_att), dim=2) 
 
         if src_lang_oneHot is not None:
             tmp = src_lang_oneHot[:,None,:].repeat(1,x_seq_len,1)
@@ -217,10 +207,6 @@ class Encoder(nn.Module):
         # Add tgt_lang rep
         if l_in is not None:
             l_in_emb = self.emb(l_in)
-            if self.share_enc_dec:
-                pad_att = Variable( self.tt.FloatTensor(l_in_emb.size()[0], \
-                                                        l_in_emb.size()[1], self.d_ctx).zero_() )
-                l_in_emb = torch.cat((l_in_emb, pad_att), dim=2)
 
             x_in_emb = torch.cat((l_in_emb, x_in_emb), dim=1) # (batch_size, x_seq_len+1, D_emb)
             x_in_emb_r = torch.cat((l_in_emb, x_in_emb_r), dim=1) # (batch_size, x_seq_len+1, D_emb)
@@ -271,8 +257,7 @@ class Decoder(nn.Module):
     # Base recurrent attention-based decoder class.
     def __init__(
              self, n_tgt_vocab, n_max_seq, n_layers=2,
-             d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True, nb_lang_tgt=0, cuda=False,
-             return_attn_output=False):
+             d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True, nb_lang_tgt=0, cuda=False):
         super(Decoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -325,7 +310,6 @@ class Decoder(nn.Module):
         self.n_tgt_vocab = n_tgt_vocab
         self.d_word_vec = d_word_vec
         self.n_max_seq = n_max_seq
-        self.return_attn_output = return_attn_output
 
     def forward(self, h_in, h_in_len, y_in, l_in=None, tgt_lang_oneHot=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
@@ -365,8 +349,6 @@ class Decoder(nn.Module):
                 # (batch_size, x_seq_len, d_ctx)
 
         logits = []
-        if self.return_attn_output:
-            c_ts = Variable(self.tt.FloatTensor(batch_size, y_seq_len, 2*self.d_model).zero_())
         for idx in range(y_seq_len):
             ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, -1) \
                     # (batch_size, d_model * n_layers)
@@ -384,8 +366,6 @@ class Decoder(nn.Module):
             c_t = torch.mul( h_in, score ) # (batch_size, x_seq_len, d_ctx)
             c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
             
-            if self.return_attn_output:
-                c_ts[:, idx] = c_t
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
             if tgt_lang_oneHot is not None:
@@ -412,15 +392,14 @@ class Decoder(nn.Module):
 
             s_tm1 = s_t
             # logits : list of (batch_size, vocab_size) vectors
-        #import ipdb; ipdb.set_trace()
+        
         ans = torch.cat(logits, 0) # (y_seq_len * batch_size, vocab_size)
         ans = ans.view(y_seq_len, batch_size, self.n_tgt_vocab).transpose(0,1).contiguous()
         if l_in is not None:
             ans = ans[:,1:]
             ans = ans.contiguous()
             y_seq_len -= 1
-        if self.return_attn_output:
-            return ans.view(batch_size * y_seq_len, -1), c_ts
+        
         return ans.view(batch_size * y_seq_len, -1)
 
     def greedy_search(self, h_in, h_in_len, l_in=None, tgt_lang_oneHot=None):
@@ -533,8 +512,7 @@ class NMTmodelRNN(nn.Module):
             self, n_src_vocab, n_tgt_vocab, n_max_seq, n_layers=2,
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
-            share_enc_dec=False,
-            enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False, return_attn_output=False,
+            enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False,
             srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, cuda=False):
 
 
@@ -546,22 +524,15 @@ class NMTmodelRNN(nn.Module):
             n_tgt_vocab, n_max_seq, n_layers=n_layers,
             d_word_vec=d_word_vec, d_model=d_model,
             dropout=dropout, no_proj_share_weight = no_proj_share_weight,
-            cuda=cuda, nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*dec_tgtLang_oh, return_attn_output=return_attn_output)
+            cuda=cuda, nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*dec_tgtLang_oh)
 
-        if share_enc_dec:
-            self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
-                                    d_word_vec=d_word_vec, d_model=d_model,
-                                    dropout=dropout, share_enc_dec=share_enc_dec,
-                                    cuda=cuda)
-            self.encoder.rnn1 = self.decoder.rnn
-            self.encoder.rnn2 = self.decoder.rnn
-        else:
-            self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
-                                    d_word_vec=d_word_vec, d_model=d_model,
-                                    dropout=dropout,
-                                    nb_lang_src=len(srcLangIdx2oneHotIdx)*enc_srcLang_oh,
-                                    nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*enc_tgtLang_oh,
-                                    cuda=cuda)
+        
+        self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
+                                d_word_vec=d_word_vec, d_model=d_model,
+                                dropout=dropout,
+                                nb_lang_src=len(srcLangIdx2oneHotIdx)*enc_srcLang_oh,
+                                nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*enc_tgtLang_oh,
+                                cuda=cuda)
 
         if embs_share_weight:
             # Share the weight matrix between src/tgt word embeddings
@@ -576,7 +547,6 @@ class NMTmodelRNN(nn.Module):
         self.dec_tgtLang_oh = dec_tgtLang_oh
 
         
-        self.return_attn_output = return_attn_output
         self.srcLangIdx2oneHotIdx = srcLangIdx2oneHotIdx
         self.tgtLangIdx2oneHotIdx = tgtLangIdx2oneHotIdx
         self.tt = torch.cuda if cuda else torch
@@ -623,12 +593,5 @@ class NMTmodelRNN(nn.Module):
 
         
         dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq, tgt_lang_seq_forDec, tgt_lang_oneHot_forDec)
-        
 
-        c_ts = None
-        if self.return_attn_output:
-            dec_output, c_ts = dec_output
-
-        #import ipdb; ipdb.set_trace()
-
-        return dec_output, enc_output, lengths_seq_src, lengths_seq_tgt, c_ts
+        return dec_output
