@@ -253,6 +253,11 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
             enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx],
                 tgt_lang_seq_forEnc, src_lang_oneHot_forEnc, tgt_lang_oneHot_forEnc)
 
+            if opt.uni_steps:
+                enc_output = model_translate.uni_enc(enc_output, lengths_seq_src)
+                lengths_seq_src[:] = model_translate.uni_steps
+
+
             tgt_lang_seq_forDec = tgt_lang_seq[sent_sort_idx] if opt.dec_lang else None
             if opt.dec_tgtLang_oh:
                 tgt_lang_oneHot_forDec = model_translate.lang2oneHot(tgt_lang_seq, opt.tgtLangIdx2oneHotIdx)
@@ -362,11 +367,12 @@ def load_model(opt):
         dropout=model_opt.dropout,
         enc_lang= model_opt.enc_lang,
         dec_lang=model_opt.dec_lang,
-        enc_srcLang_oh=opt.enc_srcLang_oh,
-        enc_tgtLang_oh=opt.enc_tgtLang_oh,
-        dec_tgtLang_oh=opt.dec_tgtLang_oh,
-        srcLangIdx2oneHotIdx=opt.srcLangIdx2oneHotIdx,
-        tgtLangIdx2oneHotIdx=opt.tgtLangIdx2oneHotIdx,
+        enc_srcLang_oh=model_opt.enc_srcLang_oh,
+        enc_tgtLang_oh=model_opt.enc_tgtLang_oh,
+        dec_tgtLang_oh=model_opt.dec_tgtLang_oh,
+        srcLangIdx2oneHotIdx=model_opt.srcLangIdx2oneHotIdx,
+        tgtLangIdx2oneHotIdx=model_opt.tgtLangIdx2oneHotIdx,
+        uni_steps=model_opt.uni_steps,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -472,6 +478,8 @@ def main():
     parser.add_argument('-extra_valid_tgt', type=str, nargs='+', help='Path extra valid target')
     parser.add_argument('-extra_valid_srcLang', type=str, nargs='+', help='Path extra valid source language')
     parser.add_argument('-extra_valid_tgtLang', type=str, nargs='+', help='Path extra valid target language')
+
+    parser.add_argument('-uni_steps', type=int, default=0)
     opt = parser.parse_args()
 
     assert not (opt.dec_lang and opt.dec_tgtLang_oh)
@@ -578,6 +586,7 @@ def main():
             dec_tgtLang_oh=opt.dec_tgtLang_oh,
             srcLangIdx2oneHotIdx=opt.srcLangIdx2oneHotIdx,
             tgtLangIdx2oneHotIdx=opt.tgtLangIdx2oneHotIdx,
+            uni_steps=opt.uni_steps,
             cuda=opt.cuda)
 
         #print(modelRNN)
