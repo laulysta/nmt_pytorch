@@ -562,11 +562,12 @@ class NMTmodelRNN(nn.Module):
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
             enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False,
-            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, uni_steps=10, cuda=False):
+            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, uni_steps=0, uni_coeff=0., cuda=False):
 
 
         self.n_layers = n_layers
         self.uni_steps = uni_steps
+        self.uni_coeff = uni_coeff
 
         super(NMTmodelRNN, self).__init__()
 
@@ -626,13 +627,13 @@ class NMTmodelRNN(nn.Module):
     def forward(self, src, tgt, src_lang=None, tgt_lang=None):
         # src_seq and src_pos: sent_len * batch_size
         src_seq, src_pos = src
-        tgt_seq, tgt_pos = tgt
+        tgt_seq_ori, tgt_pos = tgt
         tgt_lang_seq, tgt_lang_pos = tgt_lang if tgt_lang is not None else (None, None)
         src_lang_seq, src_lang_pos = src_lang if src_lang is not None else (None, None)
 
-        lengths_seq_tgt, idx_tgt = tgt_pos.max(1)
-        lengths_seq_tgt = lengths_seq_tgt - 1 # Don't count EOS
-        tgt_seq = tgt_seq[:, :-1]
+        lengths_seq_tgt_ori, idx_tgt = tgt_pos.max(1)
+        lengths_seq_tgt = lengths_seq_tgt_ori - 1 # Don't count EOS
+        tgt_seq = tgt_seq_ori[:, :-1]
         tgt_pos = tgt_pos[:, :-1]
         
         lengths_seq_src, idx_src = src_pos.max(1)
@@ -655,4 +656,16 @@ class NMTmodelRNN(nn.Module):
         
         dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq, tgt_lang_seq_forDec, tgt_lang_oneHot_forDec)
 
-        return dec_output
+        #################################################
+        if self.uni_coeff and self.uni_steps:
+            _, sent_sort_idx = lengths_seq_tgt_ori.sort(descending=True)
+            enc_output_tgt = self.encoder(tgt_seq_ori[sent_sort_idx], lengths_seq_tgt_ori[sent_sort_idx])
+            enc_output_tgt = self.uni_enc(enc_output_tgt, lengths_seq_tgt_ori[sent_sort_idx])
+            _, sent_revert_idx = sent_sort_idx.sort()
+            sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
+            enc_output_tgt = enc_output_tgt[sent_revert_idx]
+
+            sim_loss = ((enc_output - enc_output_tgt)**2).sum()
+            return dec_output, sim_loss
+
+        return dec_output, None
