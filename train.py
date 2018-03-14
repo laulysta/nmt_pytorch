@@ -157,7 +157,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
             print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, avg_sim_loss: {avg_sim_loss: 8.5f}'\
               ', elapse: {elapse:3.3f} min'.format(
                   ppl=math.exp(min(total_loss/n_total_words, 100)), accu=100*n_total_correct/n_total_words,
-                  avg_sim_loss=total_sim_loss/n_total_sim, 
+                  avg_sim_loss=total_sim_loss/n_total_sim if (opt.uni_coeff and opt.uni_steps) else 0,
                   elapse=(time.time()-start)/60))
 
             pct_next_save += opt.save_freq_pct
@@ -272,9 +272,8 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
                 tgt_lang_seq_forEnc, src_lang_oneHot_forEnc, tgt_lang_oneHot_forEnc)
 
             if opt.uni_steps:
-                enc_output = model_translate.uni_enc(enc_output, lengths_seq_src)
+                enc_output = model_translate.uni_enc(enc_output, lengths_seq_src[sent_sort_idx])
                 lengths_seq_src[:] = model_translate.uni_steps
-
 
             tgt_lang_seq_forDec = tgt_lang_seq[sent_sort_idx] if opt.dec_lang else None
             if opt.dec_tgtLang_oh:

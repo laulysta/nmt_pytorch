@@ -128,9 +128,7 @@ class UniversalEncoder(nn.Module):
         ctx = F.tanh(ctx_h + ctx_k) # bs x uni_steps x n_seq_len x d_ctx
 
         score = self.ctx_to_score(ctx) # bs x uni_steps x n_seq_len x 1
-        #import ipdb; ipdb.set_trace()
-        score.data.masked_fill_(xmask[:, None, :, None], -float('inf'))
-        
+        score.data.masked_fill_(xmask[:, None, :, None], -float('inf')) 
 
         score = F.softmax(score, dim=2)
 
@@ -591,7 +589,7 @@ class NMTmodelRNN(nn.Module):
                                     dropout=dropout, cuda=cuda)
 
         if uni_steps:
-            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps)
+            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, cuda=cuda)
 
         if embs_share_weight:
             # Share the weight matrix between src/tgt word embeddings

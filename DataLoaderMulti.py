@@ -43,6 +43,7 @@ class DataLoaderMulti(object):
         sources = []
         targets = []
         tgt_langs = []
+        src_langs = []
         if src_lang_insts:
             src_lang_dict = {}
             src_val = 0
@@ -53,7 +54,6 @@ class DataLoaderMulti(object):
                     src_val += 1
                 new_src_lang_insts.append([src_lang_dict[elt[0]]])
             src_lang_insts = new_src_lang_insts
-            src_langs = []
         for ii, start_idx in enumerate(list_start):
             if ii < len(list_start)-1:
                 sources += [src_insts[start_idx: list_start[ii+1]]]
