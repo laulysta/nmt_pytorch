@@ -119,7 +119,7 @@ def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, srcLang_path=None, t
         tgt_insts=None,
         src_lang_insts=(valid_src_lang_insts if opt.source_lang else None),
         tgt_lang_insts=(valid_tgt_lang_insts if opt.target_lang else None),
-        batch_size=opt.batch_size,
+        batch_size=opt.valid_batch_size,
         shuffle=False,
         cuda=opt.cuda,
         is_train=False,
@@ -219,7 +219,7 @@ def main():
     parser.add_argument('-val_srclang', type=str, default='',
                         help='Path to the srclang')
 
-    parser.add_argument('-batch_size', type=int, default=64)
+    parser.add_argument('-valid_batch_size', type=int, default=32)
     parser.add_argument('-no_cuda', action='store_true')
     parser.add_argument('-multi_gpu', action='store_true')
 

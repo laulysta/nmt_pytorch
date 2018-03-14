@@ -375,6 +375,7 @@ def main():
 
     parser.add_argument('-epoch', type=int, default=100)
     parser.add_argument('-batch_size', type=int, default=64)
+    parser.add_argument('-valid_batch_size', type=int, default=32)
 
     parser.add_argument('-d_word_vec', type=int, default=620)
     parser.add_argument('-d_model', type=int, default=1000)
@@ -470,7 +471,7 @@ def main():
         tgt_insts=data['valid']['tgt'],
         src_lang_insts=(data['valid']['src_lang'] if opt.source_lang else None),
         tgt_lang_insts=(data['valid']['tgt_lang'] if opt.target_lang else None),
-        batch_size=opt.batch_size,
+        batch_size=opt.valid_batch_size,
         shuffle=False,
         cuda=opt.cuda,
         is_train=False,
@@ -483,7 +484,7 @@ def main():
         tgt_insts=None,
         src_lang_insts=(data['valid']['src_lang'] if opt.source_lang else None),
         tgt_lang_insts=(data['valid']['tgt_lang'] if opt.target_lang else None),
-        batch_size=opt.batch_size,
+        batch_size=opt.valid_batch_size,
         shuffle=False,
         cuda=opt.cuda,
         is_train=False,
