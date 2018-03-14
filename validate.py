@@ -100,11 +100,13 @@ def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, srcLang_path=None, t
     valid_src_word_insts = read_instances_from_file(src_path)
     valid_src_insts = convert_instance_to_idx_seq(valid_src_word_insts, src_word2idx)
 
-    if srcLang_path:
+    if opt.source_lang:
+        assert srcLang_path
         valid_src_lang_word_insts = read_instances_from_file(srcLang_path, target_lang=True)
         valid_src_lang_insts = convert_instance_to_idx_seq(valid_src_lang_word_insts, src_word2idx)
 
-    if tgtLang_path:
+    if opt.target_lang:
+        assert tgtLang_path
         valid_tgt_lang_word_insts = read_instances_from_file(tgtLang_path, target_lang=True)
         valid_tgt_lang_insts = convert_instance_to_idx_seq(valid_tgt_lang_word_insts, src_word2idx)
 
@@ -115,8 +117,8 @@ def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, srcLang_path=None, t
         tgt_word2idx,
         src_insts=valid_src_insts,
         tgt_insts=None,
-        src_lang_insts=(valid_src_lang_insts if srcLang_path else None),
-        tgt_lang_insts=(valid_tgt_lang_insts if tgtLang_path else None),
+        src_lang_insts=(valid_src_lang_insts if opt.source_lang else None),
+        tgt_lang_insts=(valid_tgt_lang_insts if opt.target_lang else None),
         batch_size=opt.batch_size,
         shuffle=False,
         cuda=opt.cuda,
@@ -235,6 +237,8 @@ def main():
     model_translate, epoch_i, best_BLEU, model_opt = load_model(opt)
     if opt.cuda:
         model_translate = model_translate.cuda()
+    opt.source_lang = model_opt.source_lang
+    opt.target_lang = model_opt.target_lang
 
     #========= Loading Dataset =========#
     data = torch.load(opt.data_dict)
