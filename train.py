@@ -247,78 +247,9 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
         model_translate = model.model
 
     output_name = model_name + '.output.dev'
-    with open(output_name, 'w') as f:
-        for batch in tqdm(validation_data_translate, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
-            #import ipdb; ipdb.set_trace()
-            # No tgt, not balanced
-            if opt.target_lang and opt.source_lang:
-                (src_seq, src_pos), (src_lang_seq, src_lang_pos), (tgt_lang_seq, tgt_lang_pos) = batch
-            elif opt.target_lang:
-                (src_seq, src_pos), (tgt_lang_seq, tgt_lang_pos) = batch
-            elif opt.source_lang:
-                (src_seq, src_pos), (src_lang_seq, src_lang_pos) = batch
-            else:
-                (src_seq, src_pos) = batch
-
-            lengths_seq_src, idx_src = src_pos.max(1)
-
-            _, sent_sort_idx = lengths_seq_src.sort(descending=True)
-
-            tgt_lang_seq_forEnc = tgt_lang_seq[sent_sort_idx] if opt.enc_lang else None
-            src_lang_oneHot_forEnc = model_translate.lang2oneHot(src_lang_seq, opt.srcLangIdx2oneHotIdx)[sent_sort_idx] if opt.enc_srcLang_oh else None
-            tgt_lang_oneHot_forEnc = model_translate.lang2oneHot(tgt_lang_seq, opt.tgtLangIdx2oneHotIdx)[sent_sort_idx] if opt.enc_tgtLang_oh else None
-
-            enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx],
-                tgt_lang_seq_forEnc, src_lang_oneHot_forEnc, tgt_lang_oneHot_forEnc)
-
-            if opt.uni_steps:
-                enc_output = model_translate.uni_enc(enc_output, lengths_seq_src[sent_sort_idx])
-                lengths_seq_src[:] = model_translate.uni_steps
-
-            tgt_lang_seq_forDec = tgt_lang_seq[sent_sort_idx] if opt.dec_lang else None
-            if opt.dec_tgtLang_oh:
-                tgt_lang_oneHot_forDec = model_translate.lang2oneHot(tgt_lang_seq, opt.tgtLangIdx2oneHotIdx)
-                tgt_lang_oneHot_forDec = tgt_lang_oneHot_forDec[sent_sort_idx]
-            else:
-                tgt_lang_oneHot_forDec = None
-
-            all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq_forDec, tgt_lang_oneHot_forDec)
-            ###
-
-            # if opt.dec_lang:
-            #     all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq[sent_sort_idx])
-            # else:
-            #     all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx])
-
-            _, sent_revert_idx = sent_sort_idx.sort()
-            sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
-            all_hyp = np.array(all_hyp)
-            all_hyp = all_hyp[sent_revert_idx]
-
-            #import ipdb; ipdb.set_trace()
-            for idx_seq in all_hyp:
-                if len(idx_seq) > 0: 
-                    if idx_seq[-1] == Constants.EOS: # if last word is EOS
-                        idx_seq = idx_seq[:-1]
-                    pred_line = ' '.join([validation_data.tgt_idx2word[idx] for idx in idx_seq])
-                    f.write(pred_line + '\n')
-                else:
-                    f.write('\n')
-    try:
-        #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
-        out = subprocess.check_output("perl multi-bleu.perl " + opt.valid_bleu_ref + " < " + output_name, shell=True)
-        out = out.decode() # because out is binary
-        valid_BLEU = float(out.strip().split()[2][:-1])
-    except:
-        out = "multi-bleu.perl error"
-        valid_BLEU = -1.0
-
-    print(out)
     bleu_file = os.path.dirname(model_name) + '/bleu_scores.txt'
-    with open(bleu_file, 'a') as f:
-        #f.write("Epoch "+str(epoch_i)+": "+out)
-        f.write("Epoch{epoch:3.2f} : {out}".format(epoch=epoch_i, out=out))
-    
+    valid_BLEU = translate_data(model_translate, validation_data_translate, output_name, opt, opt.valid_bleu_ref, bleu_file_name=bleu_file)
+
     ###########################################################################################################################
     if opt.extra_valid_src and opt.extra_valid_tgt: # and opt.extra_valid_tgtLang:
         assert len(opt.extra_valid_src) == len(opt.extra_valid_tgt)

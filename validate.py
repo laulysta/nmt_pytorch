@@ -197,7 +197,7 @@ def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_
         f.write(os.path.basename(ref) + " : {out}".format(out=out))
     print(os.path.basename(ref) + " : {out}".format(out=out))
     
-
+    return valid_BLEU
 
 def main():
     ''' Main function '''
