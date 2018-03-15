@@ -39,8 +39,13 @@ def load_model(opt):
         model_opt.srcLangIdx2oneHotIdx = {}
     if 'tgtLangIdx2oneHotIdx' not in checkpoint['settings']:
         model_opt.tgtLangIdx2oneHotIdx = {}
-    if 'return_attn_output' not in checkpoint['settings']:
-        model_opt.return_attn_output = False
+    if 'gan_attn_output' not in checkpoint['settings']:
+        model_opt.gan_attn_output = False
+
+    if 'source_lang' not in checkpoint['settings']:
+        model_opt.source_lang = model_opt.enc_lang or model_opt.enc_srcLang_oh
+    if 'target_lang' not in checkpoint['settings']:
+        model_opt.target_lang =  model_opt.dec_lang or model_opt.enc_tgtLang_oh or model_opt.dec_tgtLang_oh
 
     modelRNN = NMTmodelRNN(
         model_opt.src_vocab_size,
