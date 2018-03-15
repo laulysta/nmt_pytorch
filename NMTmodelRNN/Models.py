@@ -94,7 +94,8 @@ def layer_init_weights(layer, d_out, d_in, scale=None, bias=True):
 
 class EncoderFast(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
-                d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
+                d_word_vec=512, d_model=512, dropout=0.5,
+                nb_lang_src=0, nb_lang_tgt=0, cuda=False):
         super(EncoderFast, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -103,13 +104,13 @@ class EncoderFast(nn.Module):
         emb_init_weights(self.emb, n_src_vocab, d_word_vec)
 
         self.rnn = nn.GRU(
-                    input_size=d_word_vec,
+                    input_size=d_word_vec+nb_lang_src+nb_lang_tgt,
                     hidden_size=d_model,
                     num_layers=n_layers,
                     dropout=dropout,
                     batch_first=True,
                     bidirectional=True)
-        rnn_init_weights(self.rnn, d_model, d_word_vec)
+        rnn_init_weights(self.rnn, d_model, d_word_vec+nb_lang_src+nb_lang_tgt)
 
         self.drop = nn.Dropout(p=dropout)
         self.n_layers = n_layers
@@ -125,6 +126,14 @@ class EncoderFast(nn.Module):
                                             batch_size, self.d_model).zero_() )
         x_in_emb = self.emb(x_in) # (batch_size, x_seq_len, D_emb)
         x_in_emb = self.drop(x_in_emb)
+
+        if src_lang_oneHot is not None:
+            tmp = src_lang_oneHot[:,None,:].repeat(1,x_seq_len,1)
+            x_in_emb = torch.cat((tmp, x_in_emb), dim=2)
+
+        if tgt_lang_oneHot is not None:
+            tmp = tgt_lang_oneHot[:,None,:].repeat(1,x_seq_len,1)
+            x_in_emb = torch.cat((tmp, x_in_emb), dim=2)
 
         # Lengths data is wrapped inside a Variable.
         x_in_lens = x_in_lens.data.view(-1).tolist()
@@ -534,9 +543,11 @@ class NMTmodelRNN(nn.Module):
         #                         nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*enc_tgtLang_oh,
         #                         cuda=cuda)
 
-        assert not (enc_srcLang_oh or enc_tgtLang_oh), "Not implemented"
+        #assert not (enc_srcLang_oh or enc_tgtLang_oh), "Not implemented"
         self.encoder = EncoderFast(n_src_vocab, n_max_seq,
                                     d_word_vec=d_word_vec, d_model=d_model,
+                                    nb_lang_src=len(srcLangIdx2oneHotIdx)*enc_srcLang_oh,
+                                    nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*enc_tgtLang_oh,
                                     dropout=dropout, cuda=cuda)
 
         if embs_share_weight:
