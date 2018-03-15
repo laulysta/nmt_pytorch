@@ -63,15 +63,12 @@ class MainModel(nn.Module):
     def forward(self, src, tgt, tgt_lang=None, src_lang=None):
         gold = tgt[0][:, 1:]
 
-        pred, sim_loss = self.model(src, tgt, tgt_lang=tgt_lang, src_lang=src_lang)
+        pred = self.model(src, tgt, tgt_lang=tgt_lang, src_lang=src_lang)
 
         if self.opt.smoothing:
             pred = F.log_softmax(pred, dim=1)
 
         loss = get_loss(self.crit, pred, gold, self.opt)
-
-        if self.opt.uni_coeff and self.opt.uni_steps:
-            loss = (loss, sim_loss)
 
         return loss, pred
 
@@ -116,12 +113,6 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
                 tgt_lang=tgt_lang if opt.target_lang else None,
                 src_lang=src_lang if opt.source_lang else None)
 
-        if opt.uni_coeff and opt.uni_steps:
-            ce_loss, sim_loss = loss
-            loss = ce_loss + opt.uni_coeff * sim_loss
-        else:
-            ce_loss = loss
-
         if opt.multi_gpu:
             loss.backward(torch.ones_like(loss.data))
         else:
@@ -143,21 +134,17 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         n_words = gold.data.ne(Constants.PAD).sum()
         n_total_words += n_words
         n_total_correct += n_correct
-        total_loss += ce_loss.data[0]
+        total_loss += loss.data[0]
         #import ipdb; ipdb.set_trace()
-        if opt.uni_coeff and opt.uni_steps:
-            total_sim_loss += sim_loss.data[0]
-            n_total_sim += len(src[0])*opt.uni_steps
 
         n_total_src_words += src[0].data.ne(Constants.PAD).sum()
 
 
         nb_examples_seen += len(src[0]) # batch size
         if opt.save_model and nb_examples_seen >= nb_examples_save:
-            print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, avg_sim_loss: {avg_sim_loss: 8.5f}'\
-              ', elapse: {elapse:3.3f} min'.format(
+            print('  - (Training)   ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
+              'elapse: {elapse:3.3f} min'.format(
                   ppl=math.exp(min(total_loss/n_total_words, 100)), accu=100*n_total_correct/n_total_words,
-                  avg_sim_loss=total_sim_loss/n_total_sim if (opt.uni_coeff and opt.uni_steps) else 0,
                   elapse=(time.time()-start)/60))
 
             pct_next_save += opt.save_freq_pct
@@ -202,10 +189,7 @@ def eval_epoch(model, validation_data, crit, opt):
         n_words = gold.data.ne(Constants.PAD).sum()
         n_total_words += n_words
         n_total_correct += n_correct
-        if opt.uni_coeff and opt.uni_steps:
-            total_loss += loss[0].data[0]
-        else:
-            total_loss += loss.data[0]
+        total_loss += loss.data[0]
 
     return total_loss/n_total_words, n_total_correct/n_total_words
 
@@ -320,8 +304,6 @@ def load_model(opt):
         dec_tgtLang_oh=model_opt.dec_tgtLang_oh,
         srcLangIdx2oneHotIdx=model_opt.srcLangIdx2oneHotIdx,
         tgtLangIdx2oneHotIdx=model_opt.tgtLangIdx2oneHotIdx,
-        uni_steps=model_opt.uni_steps,
-        uni_coeff=model_opt.uni_coeff,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -429,8 +411,6 @@ def main():
     parser.add_argument('-extra_valid_srcLang', type=str, nargs='+', help='Path extra valid source language')
     parser.add_argument('-extra_valid_tgtLang', type=str, nargs='+', help='Path extra valid target language')
 
-    parser.add_argument('-uni_steps', type=int, default=0)
-    parser.add_argument('-uni_coeff', type=float, default=0.)
     opt = parser.parse_args()
 
     assert not (opt.dec_lang and opt.dec_tgtLang_oh)
@@ -537,8 +517,6 @@ def main():
             dec_tgtLang_oh=opt.dec_tgtLang_oh,
             srcLangIdx2oneHotIdx=opt.srcLangIdx2oneHotIdx,
             tgtLangIdx2oneHotIdx=opt.tgtLangIdx2oneHotIdx,
-            uni_steps=opt.uni_steps,
-            uni_coeff=opt.uni_coeff,
             cuda=opt.cuda)
 
         #print(modelRNN)

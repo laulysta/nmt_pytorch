@@ -92,53 +92,6 @@ def layer_init_weights(layer, d_out, d_in, scale=None, bias=True):
     if bias:
         layer.bias.data.zero_()
 
-class UniversalEncoder(nn.Module):
-    def __init__(self, d_ctx, uni_steps, dropout=0.5, cuda=False):
-        super(UniversalEncoder, self).__init__()
-        self.tt = torch.cuda if cuda else torch
-        #import ipdb; ipdb.set_trace()
-        self.keys = nn.Parameter( self.tt.FloatTensor(uni_steps, d_ctx))
-        self.keys.data = torch.from_numpy(norm_weight(d_ctx, uni_steps, ortho=False).T) # init the weights
-        
-        self.drop = nn.Dropout(p=dropout)
-        self.d_ctx = d_ctx
-        self.uni_steps = uni_steps
-
-        self.k_to_ctx = nn.Linear(d_ctx, d_ctx)
-        layer_init_weights(self.k_to_ctx, d_ctx, d_ctx)
-        self.h_to_ctx = nn.Linear(d_ctx, d_ctx, bias=False)
-        layer_init_weights(self.h_to_ctx, d_ctx, d_ctx, bias=False)
-        self.ctx_to_score = nn.Linear(d_ctx, 1)
-        layer_init_weights(self.ctx_to_score, d_ctx, 1)
-
-    def forward(self, h_in, h_in_len):
-        
-        h_in_len = h_in_len.data.view(-1)
-        xmask = xlen_to_mask_rnn(h_in_len.tolist(), self.tt) # (batch_size, x_seq_len)
-
-        #score.data.masked_fill_(xmask, -float('inf'))
-
-        
-        ctx_h = self.h_to_ctx( h_in ) #.view(batch_size, x_seq_len, self.d_ctx)
-        ctx_h = ctx_h[:,None,:,:]
-
-        ctx_k = self.k_to_ctx(self.keys)
-        ctx_k = ctx_k[None,:,None,:]
-
-        ctx = F.tanh(ctx_h + ctx_k) # bs x uni_steps x n_seq_len x d_ctx
-
-        score = self.ctx_to_score(ctx) # bs x uni_steps x n_seq_len x 1
-        score.data.masked_fill_(xmask[:, None, :, None], -float('inf')) 
-
-        score = F.softmax(score, dim=2)
-
-        h_in_ = h_in[:, None, :, :]
-
-        c_t = torch.mul( h_in_, score ) # (batch_size, uni_steps, x_seq_len, d_ctx)
-        c_t = torch.sum( c_t, 2) # (batch_size, uni_steps, d_ctx)
-
-        return c_t
-
 class EncoderFast(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
                 d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
@@ -560,12 +513,10 @@ class NMTmodelRNN(nn.Module):
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
             enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False,
-            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, uni_steps=0, uni_coeff=0., cuda=False):
+            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, cuda=False):
 
 
         self.n_layers = n_layers
-        self.uni_steps = uni_steps
-        self.uni_coeff = uni_coeff
 
         super(NMTmodelRNN, self).__init__()
 
@@ -587,9 +538,6 @@ class NMTmodelRNN(nn.Module):
         self.encoder = EncoderFast(n_src_vocab, n_max_seq,
                                     d_word_vec=d_word_vec, d_model=d_model,
                                     dropout=dropout, cuda=cuda)
-
-        if uni_steps:
-            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, cuda=cuda)
 
         if embs_share_weight:
             # Share the weight matrix between src/tgt word embeddings
@@ -642,10 +590,6 @@ class NMTmodelRNN(nn.Module):
 
        
         enc_output = self.encoder(src_seq, lengths_seq_src, tgt_lang_seq_forEnc, src_lang_oneHot_forEnc, tgt_lang_oneHot_forEnc)
-        
-        if self.uni_steps:
-            enc_output = self.uni_enc(enc_output, lengths_seq_src)
-            lengths_seq_src[:] = self.uni_steps
 
         #import ipdb; ipdb.set_trace()
         tgt_lang_seq_forDec = tgt_lang_seq if self.dec_lang else None
@@ -654,16 +598,5 @@ class NMTmodelRNN(nn.Module):
         
         dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq, tgt_lang_seq_forDec, tgt_lang_oneHot_forDec)
 
-        #################################################
-        if self.uni_coeff and self.uni_steps:
-            _, sent_sort_idx = lengths_seq_tgt_ori.sort(descending=True)
-            enc_output_tgt = self.encoder(tgt_seq_ori[sent_sort_idx], lengths_seq_tgt_ori[sent_sort_idx])
-            enc_output_tgt = self.uni_enc(enc_output_tgt, lengths_seq_tgt_ori[sent_sort_idx])
-            _, sent_revert_idx = sent_sort_idx.sort()
-            sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
-            enc_output_tgt = enc_output_tgt[sent_revert_idx]
 
-            sim_loss = ((enc_output - enc_output_tgt)**2).sum()
-            return dec_output, sim_loss
-
-        return dec_output, None
+        return dec_output
