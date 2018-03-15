@@ -190,9 +190,7 @@ def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_
 
     #print(out)
     #import ipdb; ipdb.set_trace()
-    bleu_file = os.path.join(os.path.dirname(output_name), bleu_file_name)
-    #bleu_file = 'bleu_scores.txt' ####TODO: FIX me
-    with open(bleu_file, 'a') as f:
+    with open(bleu_file_name, 'a') as f:
         #f.write("Epoch "+str(epoch_i)+": "+out)
         f.write(os.path.basename(ref) + " : {out}".format(out=out))
     print(os.path.basename(ref) + " : {out}".format(out=out))
@@ -223,6 +221,8 @@ def main():
     parser.add_argument('-no_cuda', action='store_true')
     parser.add_argument('-multi_gpu', action='store_true')
 
+    parser.add_argument('-bleu_file_name', type=str, help='Full path to BLEU file')
+
     opt = parser.parse_args()
     
     opt.cuda = not opt.no_cuda
@@ -232,6 +232,9 @@ def main():
     #Create path if needed
     output_name = opt.pred_path + '/translation.output.txt'
     pathlib.Path(output_name).parent.mkdir(parents=True, exist_ok=True)
+
+    if not opt.bleu_file_name:
+        opt.bleu_file_name = os.path.join(os.path.dirname(output_name), 'bleu_scores.txt')
 
     #========= Loading Model =========#
     model_translate, epoch_i, best_BLEU, model_opt = load_model(opt)
@@ -246,7 +249,8 @@ def main():
     
     data_set = prepare_data(opt.val, src_word2idx, tgt_word2idx, opt, tgtLang_path=opt.val_tgtlang, srcLang_path=opt.val_srclang)
 
-    translate_data(model_translate, data_set, output_name, model_opt, opt.ref)
+    translate_data(model_translate, data_set, output_name, model_opt, opt.ref,
+            bleu_file_name=opt.bleu_file_name)
 
 if __name__ == '__main__':
     main()
