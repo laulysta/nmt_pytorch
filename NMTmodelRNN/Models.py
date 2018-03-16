@@ -92,7 +92,7 @@ def layer_init_weights(layer, d_out, d_in, scale=None, bias=True):
     if bias:
         layer.bias.data.zero_()
 
-def position_encoding_init(n_position, d_pos_vec):
+def position_encoding_init(n_position, d_pos_vec, tt):
     ''' Init the sinusoid position encoding table '''
 
     # keep dim 0 for padding token position encoding zero vector
@@ -102,7 +102,7 @@ def position_encoding_init(n_position, d_pos_vec):
 
     position_enc[1:, 0::2] = np.sin(position_enc[1:, 0::2]) # dim 2i
     position_enc[1:, 1::2] = np.cos(position_enc[1:, 1::2]) # dim 2i+1
-    return torch.from_numpy(position_enc).type(torch.FloatTensor)
+    return torch.from_numpy(position_enc).type(tt.FloatTensor)
 
 class UniversalEncoder(nn.Module):
     def __init__(self, d_ctx, uni_steps, use_pos_emb=False, dropout=0.5, cuda=False):
@@ -113,7 +113,7 @@ class UniversalEncoder(nn.Module):
         self.keys.data = torch.from_numpy(norm_weight(d_ctx, uni_steps, ortho=False).T) # init the weights
 
         self.position_emb = Variable(self.tt.FloatTensor(uni_steps, d_ctx))
-        self.position_emb.data = position_encoding_init(uni_steps, d_ctx)
+        self.position_emb.data = position_encoding_init(uni_steps, d_ctx, self.tt)
         
         self.drop = nn.Dropout(p=dropout)
         self.d_ctx = d_ctx
