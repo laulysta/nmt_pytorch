@@ -92,17 +92,33 @@ def layer_init_weights(layer, d_out, d_in, scale=None, bias=True):
     if bias:
         layer.bias.data.zero_()
 
+def position_encoding_init(n_position, d_pos_vec):
+    ''' Init the sinusoid position encoding table '''
+
+    # keep dim 0 for padding token position encoding zero vector
+    position_enc = np.array([
+        [pos / np.power(10000, 2*i/d_pos_vec) for i in range(d_pos_vec)]
+        if pos != 0 else np.zeros(d_pos_vec) for pos in range(n_position)])
+
+    position_enc[1:, 0::2] = np.sin(position_enc[1:, 0::2]) # dim 2i
+    position_enc[1:, 1::2] = np.cos(position_enc[1:, 1::2]) # dim 2i+1
+    return torch.from_numpy(position_enc).type(torch.FloatTensor)
+
 class UniversalEncoder(nn.Module):
-    def __init__(self, d_ctx, uni_steps, dropout=0.5, cuda=False):
+    def __init__(self, d_ctx, uni_steps, use_pos_emb=False, dropout=0.5, cuda=False):
         super(UniversalEncoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         #import ipdb; ipdb.set_trace()
         self.keys = nn.Parameter( self.tt.FloatTensor(uni_steps, d_ctx))
         self.keys.data = torch.from_numpy(norm_weight(d_ctx, uni_steps, ortho=False).T) # init the weights
+
+        self.position_emb = Variable(self.tt.FloatTensor(uni_steps, d_ctx))
+        self.position_emb.data = position_encoding_init(uni_steps, d_ctx)
         
         self.drop = nn.Dropout(p=dropout)
         self.d_ctx = d_ctx
         self.uni_steps = uni_steps
+        self.use_pos_emb = use_pos_emb
 
         self.k_to_ctx = nn.Linear(d_ctx, d_ctx)
         layer_init_weights(self.k_to_ctx, d_ctx, d_ctx)
@@ -117,12 +133,16 @@ class UniversalEncoder(nn.Module):
         xmask = xlen_to_mask_rnn(h_in_len.tolist(), self.tt) # (batch_size, x_seq_len)
 
         #score.data.masked_fill_(xmask, -float('inf'))
-
+        #import ipdb; ipdb.set_trace()
+        if self.use_pos_emb:
+            keys = self.keys + self.position_emb
+        else:
+            keys = self.keys
         
         ctx_h = self.h_to_ctx( h_in ) #.view(batch_size, x_seq_len, self.d_ctx)
         ctx_h = ctx_h[:,None,:,:]
 
-        ctx_k = self.k_to_ctx(self.keys)
+        ctx_k = self.k_to_ctx(keys)
         ctx_k = ctx_k[None,:,None,:]
 
         ctx = F.tanh(ctx_h + ctx_k) # bs x uni_steps x n_seq_len x d_ctx
@@ -560,7 +580,7 @@ class NMTmodelRNN(nn.Module):
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
             enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False,
-            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, uni_steps=0, uni_coeff=0., cuda=False):
+            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, uni_steps=0, uni_coeff=0., use_pos_emb=False, cuda=False):
 
 
         self.n_layers = n_layers
@@ -589,7 +609,7 @@ class NMTmodelRNN(nn.Module):
                                     dropout=dropout, cuda=cuda)
 
         if uni_steps:
-            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, cuda=cuda)
+            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, use_pos_emb=use_pos_emb, cuda=cuda)
 
         if embs_share_weight:
             # Share the weight matrix between src/tgt word embeddings
