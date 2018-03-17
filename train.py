@@ -249,7 +249,7 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
     output_name = model_name + '.output.dev'
     bleu_file = os.path.dirname(model_name) + '/bleu_scores.txt'
     valid_BLEU = translate_data(model_translate, validation_data_translate, output_name, opt, opt.valid_bleu_ref, bleu_file_name=bleu_file)
-
+    #import ipdb; ipdb.set_trace()
     ###########################################################################################################################
     if opt.extra_valid_src and opt.extra_valid_tgt: # and opt.extra_valid_tgtLang:
         assert len(opt.extra_valid_src) == len(opt.extra_valid_tgt)
@@ -265,7 +265,7 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
 
         for ii, (src_path, tgt_path, srcLang_path, tgtLang_path) in enumerate(zip(opt.extra_valid_src, opt.extra_valid_tgt, opt.extra_valid_srcLang, opt.extra_valid_tgtLang)):
             data_set = prepare_data(src_path, validation_data.src_word2idx, validation_data.tgt_word2idx, opt, srcLang_path=srcLang_path, tgtLang_path=tgtLang_path)
-            extra_bleu_file_name = 'bleu_scores_extra' + str(ii+1) + '.txt'
+            extra_bleu_file_name = os.path.dirname(model_name) + '/bleu_scores_extra' + str(ii+1) + '.txt'
             extra_output_name = output_name + '_extra' + str(ii+1)
             translate_data(model_translate, data_set, extra_output_name, opt, tgt_path, bleu_file_name=extra_bleu_file_name)
 
