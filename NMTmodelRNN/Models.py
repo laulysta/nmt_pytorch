@@ -159,6 +159,36 @@ class UniversalEncoder(nn.Module):
 
         return c_t
 
+class EffUniversalEncoder(nn.Module):
+    def __init__(self, d_ctx, uni_steps, use_pos_emb=False, dropout=0.5, cuda=False):
+        super(EffUniversalEncoder, self).__init__()
+        self.tt = torch.cuda if cuda else torch
+
+        self.W = nn.Linear(d_ctx, uni_steps, bias=False)
+        layer_init_weights(self.W, d_ctx, uni_steps, bias=False)
+
+        self.drop = nn.Dropout(p=dropout)
+        self.d_ctx = d_ctx
+        self.uni_steps = uni_steps
+        self.use_pos_emb = use_pos_emb
+
+    def forward(self, h_in, h_in_len):
+
+        h_in_len = h_in_len.data.view(-1)
+        xmask = xlen_to_mask_rnn(h_in_len.tolist(), self.tt) # b x sl
+
+        # h_in: b x sl x 2d
+        score = self.W(h_in) # b x sl x K
+        score = F.softmax(score, dim=2)
+
+        h_in_ = h_in[:, :, None, :] # b x sl x K x 2D
+        c_t = torch.mul(h_in_, score[:,:,:,None])
+        c_t.data.masked_fill_(xmask[:,:,None,None], 0.)
+        c_t = torch.sum(c_t, 1)
+
+        return c_t
+
+
 class EncoderFast(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
                 d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
@@ -324,7 +354,8 @@ class Decoder(nn.Module):
     # Base recurrent attention-based decoder class.
     def __init__(
              self, n_tgt_vocab, n_max_seq, n_layers=2,
-             d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True, nb_lang_tgt=0, cuda=False):
+             d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True, nb_lang_tgt=0,
+             eff_attn=False, uni_steps=30, cuda=False):
         super(Decoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -343,14 +374,21 @@ class Decoder(nn.Module):
         self.ctx_to_s0 = nn.Linear(d_ctx, n_layers * d_model)
         layer_init_weights(self.ctx_to_s0, d_ctx, n_layers * d_model)
 
-        self.y_to_ctx = nn.Linear(d_word_vec, d_ctx)
-        layer_init_weights(self.y_to_ctx, d_word_vec, d_ctx)
-        self.s_to_ctx = nn.Linear(d_model * n_layers, d_ctx, bias=False)
-        layer_init_weights(self.s_to_ctx, d_model * n_layers, d_ctx, bias=False)
-        self.h_to_ctx = nn.Linear(d_ctx, d_ctx, bias=False)
-        layer_init_weights(self.h_to_ctx, d_ctx, d_ctx, bias=False)
-        self.ctx_to_score = nn.Linear(d_ctx, 1)
-        layer_init_weights(self.ctx_to_score, d_ctx, 1)
+        if eff_attn:
+            self.eff_attn = True
+            self.uni_steps = uni_steps
+            self.W = nn.Linear(d_model, uni_steps, bias=False)
+            layer_init_weights(self.W, d_model, uni_steps, bias=False)
+        else:
+            self.eff_attn = False
+            self.y_to_ctx = nn.Linear(d_word_vec, d_ctx)
+            layer_init_weights(self.y_to_ctx, d_word_vec, d_ctx)
+            self.s_to_ctx = nn.Linear(d_model * n_layers, d_ctx, bias=False)
+            layer_init_weights(self.s_to_ctx, d_model * n_layers, d_ctx, bias=False)
+            self.h_to_ctx = nn.Linear(d_ctx, d_ctx, bias=False)
+            layer_init_weights(self.h_to_ctx, d_ctx, d_ctx, bias=False)
+            self.ctx_to_score = nn.Linear(d_ctx, 1)
+            layer_init_weights(self.ctx_to_score, d_ctx, 1)
 
         self.y_to_fin = nn.Linear(d_word_vec, d_word_vec)
         layer_init_weights(self.y_to_fin, d_word_vec, d_word_vec)
@@ -412,21 +450,24 @@ class Decoder(nn.Module):
         h_in_big = h_in.view(-1, self.d_ctx) \
                 # (batch_size * x_seq_len, d_ctx) 
 
-        ctx_h = self.h_to_ctx( h_in_big ).view(batch_size, x_seq_len, self.d_ctx)
-                # (batch_size, x_seq_len, d_ctx)
+        if not self.eff_attn:
+            ctx_h = self.h_to_ctx( h_in_big ).view(batch_size, x_seq_len, self.d_ctx) # (batch_size, x_seq_len, d_ctx)
 
         logits = []
         for idx in range(y_seq_len):
             ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, -1) \
-                    # (batch_size, d_model * n_layers)
-            #import ipdb; ipdb.set_trace()
-            ctx_y = self.y_to_ctx( y_in_emb[:,idx,:] )[:,None,:] # (batch_size, 1, d_ctx)
-            ctx_s = self.s_to_ctx( ctx_s_t_ )[:,None,:]
-            ctx = F.tanh(ctx_y + ctx_s + ctx_h) # (batch_size, x_seq_len, d_ctx)
-            ctx = ctx.view(-1, self.d_ctx) # (batch_size * x_seq_len, d_ctx)
+                            # (batch_size, d_model * n_layers)
+            if self.eff_attn:
+                score = self.W(ctx_s_t_) # bs x K
+            else:
+                ctx_y = self.y_to_ctx( y_in_emb[:,idx,:] )[:,None,:] # (batch_size, 1, d_ctx)
+                ctx_s = self.s_to_ctx( ctx_s_t_ )[:,None,:]
+                ctx = F.tanh(ctx_y + ctx_s + ctx_h) # (batch_size, x_seq_len, d_ctx)
+                ctx = ctx.view(-1, self.d_ctx) # (batch_size * x_seq_len, d_ctx)
 
-            score = self.ctx_to_score(ctx).view(batch_size, -1) # (batch_size, x_seq_len)
-            score.data.masked_fill_(xmask, -float('inf'))
+                score = self.ctx_to_score(ctx).view(batch_size, -1) # (batch_size, x_seq_len)
+                score.data.masked_fill_(xmask, -float('inf'))
+
             score = F.softmax(score, dim=1)
             score = score[:,:,None] # (batch_size, x_seq_len, 1)
 
@@ -495,8 +536,9 @@ class Decoder(nn.Module):
             y_in_emb_andMore = torch.cat((tgt_lang_oneHot[:,None,:], y_in_emb), dim=2)
 
         h_in_big = h_in.contiguous().view(batch_size * x_seq_len, self.d_ctx ) \
-                # (batch_size * x_seq_len, D_hid_enc * num_dir_enc) 
-        ctx_h = self.h_to_ctx( h_in_big ).view(batch_size, x_seq_len, self.d_ctx)
+                # (batch_size * x_seq_len, D_hid_enc * num_dir_enc)
+        if not True:
+            ctx_h = self.h_to_ctx( h_in_big ).view(batch_size, x_seq_len, self.d_ctx)
 
         gen_idx = [[] for ii in range(batch_size)]
         done = np.array( [False for ii in range(batch_size)] )
@@ -505,17 +547,19 @@ class Decoder(nn.Module):
             # in (batch_size, 1, d_word_vec)
             # s_t (n_layers, batch_size, d_model)
             #_, s_t_ = self.rnn1( y_in_emb, s_t )
-
             ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, self.n_layers * self.d_model) \
                     # (batch_size, n_layers * d_model)
+            if True:
+                score = self.W(ctx_s_t_) # bs x K
+            else:
+                ctx_y = self.y_to_ctx( y_in_emb[:,idx,:] )[:,None,:] # (batch_size, 1, d_ctx)
+                ctx_s = self.s_to_ctx( ctx_s_t_ )[:,None,:]
+                ctx = F.tanh(ctx_y + ctx_s + ctx_h) # (batch_size, x_seq_len, d_ctx)
+                ctx = ctx.view(-1, self.d_ctx) # (batch_size * x_seq_len, d_ctx)
 
-            ctx_y = self.y_to_ctx( y_in_emb.view(batch_size, self.d_word_vec) )[:,None,:]
-            ctx_s = self.s_to_ctx( ctx_s_t_ )[:,None,:]
-            ctx = F.tanh(ctx_y + ctx_s + ctx_h)
-            ctx = ctx.view(batch_size * x_seq_len, self.d_ctx)
+                score = self.ctx_to_score(ctx).view(batch_size, -1) # (batch_size, x_seq_len)
+                score.data.masked_fill_(xmask, -float('inf'))
 
-            score = self.ctx_to_score(ctx).view(batch_size, -1) # (batch_size, x_seq_len)
-            score.data.masked_fill_(xmask, -float('inf'))
             score = F.softmax(score, dim=1)
             score = score[:,:,None] # (batch_size, x_seq_len, 1)
 
@@ -580,19 +624,24 @@ class NMTmodelRNN(nn.Module):
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
             enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False,
-            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, uni_steps=0, uni_coeff=0., use_pos_emb=False, cuda=False):
+            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, uni_steps=0, uni_coeff=0., use_pos_emb=False,
+            enc_eff_attn=False, dec_eff_attn=False, cuda=False):
 
 
         self.n_layers = n_layers
         self.uni_steps = uni_steps
         self.uni_coeff = uni_coeff
 
+        self.enc_eff_attn = enc_eff_attn
+        self.dec_eff_attn = dec_eff_attn
+
         super(NMTmodelRNN, self).__init__()
 
         self.decoder = Decoder(
             n_tgt_vocab, n_max_seq, n_layers=n_layers,
             d_word_vec=d_word_vec, d_model=d_model,
-            dropout=dropout, no_proj_share_weight = no_proj_share_weight,
+            dropout=dropout, no_proj_share_weight=no_proj_share_weight,
+            eff_attn=dec_eff_attn, uni_steps=self.uni_steps,
             cuda=cuda, nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*dec_tgtLang_oh)
 
         
@@ -609,7 +658,11 @@ class NMTmodelRNN(nn.Module):
                                     dropout=dropout, cuda=cuda)
 
         if uni_steps:
-            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, use_pos_emb=use_pos_emb, cuda=cuda)
+            if enc_eff_attn:
+                UniversalEncoder__ = EffUniversalEncoder
+            else:
+                UniversalEncoder__ = UniversalEncoder
+            self.uni_enc = UniversalEncoder__(d_model*2, uni_steps=uni_steps, use_pos_emb=use_pos_emb, cuda=cuda)
 
         if embs_share_weight:
             # Share the weight matrix between src/tgt word embeddings

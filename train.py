@@ -323,6 +323,8 @@ def load_model(opt):
         uni_steps=model_opt.uni_steps,
         uni_coeff=model_opt.uni_coeff,
         use_pos_emb=opt.use_pos_emb,
+        enc_eff_attn=opt.enc_eff_attn,
+        dec_eff_attn=opt.dec_eff_attn,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
@@ -433,6 +435,8 @@ def main():
     parser.add_argument('-uni_steps', type=int, default=0)
     parser.add_argument('-uni_coeff', type=float, default=0.)
     parser.add_argument('-use_pos_emb', action='store_true')
+    parser.add_argument('-enc_eff_attn', action='store_true')
+    parser.add_argument('-dec_eff_attn', action='store_true')
     opt = parser.parse_args()
 
     assert not (opt.dec_lang and opt.dec_tgtLang_oh)
@@ -542,6 +546,8 @@ def main():
             uni_steps=opt.uni_steps,
             uni_coeff=opt.uni_coeff,
             use_pos_emb=opt.use_pos_emb,
+            enc_eff_attn=opt.enc_eff_attn,
+            dec_eff_attn=opt.dec_eff_attn,
             cuda=opt.cuda)
 
         #print(modelRNN)
