@@ -171,6 +171,9 @@ class EffUniversalEncoder(nn.Module):
         self.d_ctx = d_ctx
         self.uni_steps = uni_steps
         self.use_pos_emb = use_pos_emb
+        if use_pos_emb:
+            # 1 x 1 x K
+            self.k_K = ((0.5 + self.tt.FloatTensor(range(self.uni_steps))) / self.uni_steps)[None, None, :]
 
     def forward(self, h_in, h_in_len):
 
@@ -179,6 +182,11 @@ class EffUniversalEncoder(nn.Module):
 
         # h_in: b x sl x 2d
         score = self.W(h_in) # b x sl x K
+        if self.use_pos_emb:
+            s_S = (0.5 + self.tt.FloatTensor(range(h_in_len[0])))[None, :, None] / \
+                      self.tt.FloatTensor(h_in_len.tolist())[:, None, None] # bs x sl x 1
+            pos_mask = (1.-self.k_K) * (1.-s_S) + self.k_K * s_S
+            score *= Variable(pos_mask)
         score = F.softmax(score, dim=2)
 
         h_in_ = h_in[:, :, None, :] # b x sl x K x 2D
@@ -549,7 +557,7 @@ class Decoder(nn.Module):
             #_, s_t_ = self.rnn1( y_in_emb, s_t )
             ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, self.n_layers * self.d_model) \
                     # (batch_size, n_layers * d_model)
-            if True:
+            if self.eff_attn:
                 score = self.W(ctx_s_t_) # bs x K
             else:
                 ctx_y = self.y_to_ctx( y_in_emb[:,idx,:] )[:,None,:] # (batch_size, 1, d_ctx)
