@@ -73,7 +73,7 @@ class MainModel(nn.Module):
         return loss, pred
 
 
-def train_epoch(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, nb_examples_seen, pct_next_save):
+def train_epoch(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, patience_count, nb_examples_seen, pct_next_save):
     ''' Epoch operation in training phase'''
 
     start = time.time()
@@ -150,10 +150,21 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
             pct_next_save += opt.save_freq_pct
             nb_examples_save = training_data.nb_examples*pct_next_save
             epoch_i += opt.save_freq_pct
-            best_BLEU = save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU)
+            best_BLEU, patience_count, optimizer = save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU, patience_count)
+
+            # if opt.optim == 'adam' and patience_count == opt.adam_patience:
+            #     bestModelName = opt.save_model + '_best.chkpt'
+            #     checkpoint = torch.load(bestModelName)
+            #     model.model.load_state_dict(checkpoint['model'])
+            #     epoch_i -= opt.adam_patience * opt.save_freq_pct
+            #     opt.lr = opt.lr/2
+            #     optimizer = optim.Adam(model.model.parameters(),
+            #                     lr=opt.lr, betas=(0.9, 0.98), eps=1e-09)
+            #     patience_count = 0
+
             model.train()
 
-    return total_loss/n_total_words, n_total_correct/n_total_words, epoch_i, best_BLEU, nb_examples_seen, pct_next_save
+    return total_loss/n_total_words, n_total_correct/n_total_words, epoch_i, best_BLEU, patience_count, optimizer, nb_examples_seen, pct_next_save
 
 def eval_epoch(model, validation_data, crit, opt):
     ''' Epoch operation in evaluation phase '''
@@ -193,7 +204,7 @@ def eval_epoch(model, validation_data, crit, opt):
 
     return total_loss/n_total_words, n_total_correct/n_total_words
 
-def train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU):
+def train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, patience_count):
     ''' Start training '''
 
     nb_examples_seen = 0
@@ -202,10 +213,11 @@ def train(model, training_data, validation_data, validation_data_translate, crit
     valid_accus = []
     for ii in range(opt.epoch):
         print('[ Starting epoch', epoch_i+1, ']')
+        import ipdb; ipdb.set_trace()
 
-        train_loss, train_accu, epoch_i, best_BLEU, nb_examples_seen, pct_next_save = train_epoch(model, training_data, validation_data,
-                                                                                        validation_data_translate, crit, optimizer, opt,
-                                                                                        epoch_i, best_BLEU, nb_examples_seen, pct_next_save)
+        train_loss, train_accu, epoch_i, best_BLEU, patience_count, optimizer, nb_examples_seen, pct_next_save = train_epoch(model, training_data, validation_data,
+                                                                                                            validation_data_translate, crit, optimizer, opt,
+                                                                                                            epoch_i, best_BLEU, patience_count, nb_examples_seen, pct_next_save)
         start = time.time()
         valid_loss, valid_accu = eval_epoch(model, validation_data, crit, opt)
         print('  - (Validation) ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
@@ -216,7 +228,7 @@ def train(model, training_data, validation_data, validation_data_translate, crit
         valid_accus += [valid_accu]
 
 
-def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU, valid_accu=None, valid_accus=None):
+def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU, patience_count, valid_accu=None, valid_accus=None):
     print('[ Epoch', epoch_i, ']')
     model.eval()
 
@@ -254,32 +266,47 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
             translate_data(model_translate, data_set, extra_output_name, opt, tgt_path, bleu_file_name=extra_bleu_file_name)
 
     ###########################################################################################################################
-
-    if opt.multi_gpu:
-        model_state_dict = model.module.model.state_dict()
-    else:
-        model_state_dict = model.model.state_dict()
+    model_state_dict = model_translate.state_dict()
     optimizer_state_dict = optimizer.state_dict()
     checkpoint = {
         'model': model_state_dict,
         'optimizer': optimizer_state_dict,
         'settings': opt,
         'epoch': epoch_i,
-        'best_BLEU': valid_BLEU if valid_BLEU >= best_BLEU else best_BLEU}
+        'best_BLEU': valid_BLEU if valid_BLEU >= best_BLEU else best_BLEU,
+        'patience_count': patience_count}
 
+    if valid_BLEU >= best_BLEU:
+        best_BLEU = valid_BLEU
+        torch.save(checkpoint, opt.save_model + '_best_tmp.chkpt')
+        _ = subprocess.check_output('mv ' + opt.save_model + '_best_tmp.chkpt' + ' ' + opt.save_model + '_best.chkpt', shell=True)
+        print('    - [Info] The checkpoint file has been updated.')
+        patience_count = 0
+    else:
+        patience_count += 1
+
+    if opt.optim == 'adam' and patience_count == opt.adam_patience:
+        bestModelName = opt.save_model + '_best.chkpt'
+        checkpoint = torch.load(bestModelName)
+        model_translate.load_state_dict(checkpoint['model'])
+        epoch_i -= patience_count * opt.save_freq_pct
+        opt.lr = opt.lr/2
+        optimizer = optim.Adam(model_translate.parameters(),
+                        lr=opt.lr, betas=(0.9, 0.98), eps=1e-09)
+        checkpoint['optimizer'] = optimizer.state_dict()
+        checkpoint['patience_count'] = 0
+        patience_count = 0
+
+    ###########################################################################################################################
+    
     torch.save(checkpoint, opt.save_model + '_tmp.chkpt')
     _ = subprocess.check_output('mv ' + opt.save_model + '_tmp.chkpt' + ' ' + opt.save_model + '.chkpt', shell=True)
+
     if opt.save_mode == 'all':
         #model_name = opt.save_model + '_epoch{epoch:3.2f}.chkpt'.format(epoch=epoch_i)
         torch.save(checkpoint, model_name)
-    elif opt.save_mode == 'best':
-        #model_name = opt.save_model + '.chkpt'
-        if valid_BLEU >= best_BLEU:
-            best_BLEU = valid_BLEU
-            torch.save(checkpoint, opt.save_model + '_best_tmp.chkpt')
-            _ = subprocess.check_output('mv ' + opt.save_model + '_best_tmp.chkpt' + ' ' + opt.save_model + '_best.chkpt', shell=True)
-            print('    - [Info] The checkpoint file has been updated.')
-    return best_BLEU
+    
+    return best_BLEU, patience_count, optimizer
 
 def load_model(opt):
 
@@ -287,6 +314,7 @@ def load_model(opt):
     model_opt = checkpoint['settings']
     epoch_i = checkpoint['epoch']
     best_BLEU = checkpoint['best_BLEU'] if 'best_BLEU' in checkpoint else -1.0
+    patience_count = checkpoint['patience_count'] if 'patience_count' in checkpoint else 0
     modelRNN = NMTmodelRNN(
         model_opt.src_vocab_size,
         model_opt.tgt_vocab_size,
@@ -306,6 +334,7 @@ def load_model(opt):
         tgtLangIdx2oneHotIdx=model_opt.tgtLangIdx2oneHotIdx,
         cuda=opt.cuda)
 
+    opt.lr = model_opt.lr
     modelRNN.load_state_dict(checkpoint['model'])
 
     if opt.optim == 'adadelta':
@@ -323,8 +352,7 @@ def load_model(opt):
     if not opt.no_reload_optimizer:
         optimizer.load_state_dict(checkpoint['optimizer'])
 
-    return modelRNN, optimizer, epoch_i, best_BLEU
-    
+    return modelRNN, optimizer, epoch_i, best_BLEU, patience_count
 
 def dict_lang(lang_data):
     lang_token_idx = set()
@@ -380,6 +408,8 @@ def main():
     parser.add_argument('-multi_gpu', action='store_true')
 
     parser.add_argument('-optim', type=str, choices=['adam', 'adadelta'], default='adam')
+
+    parser.add_argument('-adam_patience', type=int, default=-1)
 
     parser.add_argument('-sch_optim', action='store_true')
 
@@ -494,11 +524,12 @@ def main():
     pathlib.Path(opt.save_model).parent.mkdir(parents=True, exist_ok=True)
 
     if not opt.no_reload and (os.path.isfile(opt.save_model+".chkpt") or os.path.isfile(opt.reload_model+".chkpt")):
-        modelRNN, optimizer, epoch_i, best_BLEU = load_model(opt)
+        modelRNN, optimizer, epoch_i, best_BLEU, patience_count = load_model(opt)
     else:
         #Create model
         epoch_i = 0.0
         best_BLEU = -1.0
+        patience_count = 0
 
         modelRNN = NMTmodelRNN(
             opt.src_vocab_size,
@@ -555,7 +586,7 @@ def main():
     if opt.multi_gpu:
         model = nn.DataParallel(model)
 
-    train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU)
+    train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, patience_count)
 
 if __name__ == '__main__':
     main()
