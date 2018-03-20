@@ -229,7 +229,6 @@ def train(model, training_data, validation_data, validation_data_translate, crit
     valid_accus = []
     for ii in range(opt.epoch):
         print('[ Starting epoch', epoch_i+1, ']')
-        import ipdb; ipdb.set_trace()
 
         train_loss, train_accu, epoch_i, best_BLEU, patience_count, optimizer, nb_examples_seen, pct_next_save = train_epoch(model, training_data, validation_data,
                                                                                                             validation_data_translate, crit, optimizer, opt,
@@ -350,6 +349,7 @@ def load_model(opt):
         tgtLangIdx2oneHotIdx=model_opt.tgtLangIdx2oneHotIdx,
         uni_steps=model_opt.uni_steps,
         uni_coeff=model_opt.uni_coeff,
+        uni_norm=model_opt.uni_norm,
         use_pos_emb=opt.use_pos_emb,
         cuda=opt.cuda)
 
@@ -462,6 +462,7 @@ def main():
 
     parser.add_argument('-uni_steps', type=int, default=0)
     parser.add_argument('-uni_coeff', type=float, default=0.)
+    parser.add_argument('-uni_norm', action='store_true')
     parser.add_argument('-use_pos_emb', action='store_true')
     opt = parser.parse_args()
 
@@ -572,6 +573,7 @@ def main():
             tgtLangIdx2oneHotIdx=opt.tgtLangIdx2oneHotIdx,
             uni_steps=opt.uni_steps,
             uni_coeff=opt.uni_coeff,
+            uni_norm=opt.uni_norm,
             use_pos_emb=opt.use_pos_emb,
             cuda=opt.cuda)
 

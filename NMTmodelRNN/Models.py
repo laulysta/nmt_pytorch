@@ -105,7 +105,7 @@ def position_encoding_init(n_position, d_pos_vec, tt):
     return torch.from_numpy(position_enc).type(tt.FloatTensor)
 
 class UniversalEncoder(nn.Module):
-    def __init__(self, d_ctx, uni_steps, use_pos_emb=False, dropout=0.5, cuda=False):
+    def __init__(self, d_ctx, uni_steps, uni_norm=False, use_pos_emb=False, cuda=False):
         super(UniversalEncoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         #import ipdb; ipdb.set_trace()
@@ -115,9 +115,9 @@ class UniversalEncoder(nn.Module):
         self.position_emb = Variable(self.tt.FloatTensor(uni_steps, d_ctx))
         self.position_emb.data = position_encoding_init(uni_steps, d_ctx, self.tt)
         
-        self.drop = nn.Dropout(p=dropout)
         self.d_ctx = d_ctx
         self.uni_steps = uni_steps
+        self.uni_norm = uni_norm
         self.use_pos_emb = use_pos_emb
 
         self.k_to_ctx = nn.Linear(d_ctx, d_ctx)
@@ -157,6 +157,8 @@ class UniversalEncoder(nn.Module):
         c_t = torch.mul( h_in_, score ) # (batch_size, uni_steps, x_seq_len, d_ctx)
         c_t = torch.sum( c_t, 2) # (batch_size, uni_steps, d_ctx)
 
+        if self.uni_norm:
+            c_t = F.normalize(c_t, p=2, dim=2)
         return c_t
 
 class EncoderFast(nn.Module):
@@ -580,7 +582,7 @@ class NMTmodelRNN(nn.Module):
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
             enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False,
-            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, uni_steps=0, uni_coeff=0., use_pos_emb=False, cuda=False):
+            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, uni_steps=0, uni_coeff=0., uni_norm=False, use_pos_emb=False, cuda=False):
 
 
         self.n_layers = n_layers
@@ -609,7 +611,7 @@ class NMTmodelRNN(nn.Module):
                                     dropout=dropout, cuda=cuda)
 
         if uni_steps:
-            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, use_pos_emb=use_pos_emb, cuda=cuda)
+            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, uni_norm=uni_norm, use_pos_emb=use_pos_emb, cuda=cuda)
 
         if embs_share_weight:
             # Share the weight matrix between src/tgt word embeddings
@@ -662,7 +664,7 @@ class NMTmodelRNN(nn.Module):
 
        
         enc_output = self.encoder(src_seq, lengths_seq_src, tgt_lang_seq_forEnc, src_lang_oneHot_forEnc, tgt_lang_oneHot_forEnc)
-        
+        import ipdb; ipdb.set_trace()
         if self.uni_steps:
             enc_output = self.uni_enc(enc_output, lengths_seq_src)
             lengths_seq_src[:] = self.uni_steps
@@ -682,8 +684,11 @@ class NMTmodelRNN(nn.Module):
             _, sent_revert_idx = sent_sort_idx.sort()
             sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
             enc_output_tgt = enc_output_tgt[sent_revert_idx]
+            #sim_loss = ((enc_output - enc_output_tgt)**2).sum()
+            norm1 = torch.norm(enc_output, p=2, dim=2)
+            norm2 = torch.norm(enc_output_tgt, p=2, dim=2)
+            sim_loss = -( (enc_output*enc_output_tgt).sum(dim=2)/(norm1*norm2) ).sum()
 
-            sim_loss = ((enc_output - enc_output_tgt)**2).sum()
             return dec_output, sim_loss
 
         return dec_output, None
