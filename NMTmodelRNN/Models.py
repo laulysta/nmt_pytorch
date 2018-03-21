@@ -569,7 +569,7 @@ class NMTmodelRNN(nn.Module):
             no_proj_share_weight=True, embs_share_weight=True,
             enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False,
             srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={},
-            uni_steps=0, uni_coeff=0., uni_norm=False, use_pos_emb=False, uni_crit='cossim', uni_margin=1,
+            uni_steps=0, uni_coeff=0., uni_norm=False, use_pos_emb=False, uni_crit='cossim', uni_margin=1, uni_switch=.0,
             cuda=False):
 
 
@@ -602,6 +602,7 @@ class NMTmodelRNN(nn.Module):
 
         if uni_steps:
             self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, uni_norm=uni_norm, use_pos_emb=use_pos_emb, cuda=cuda)
+        self.uni_switch = uni_switch
 
         if embs_share_weight:
             # Share the weight matrix between src/tgt word embeddings
@@ -657,6 +658,21 @@ class NMTmodelRNN(nn.Module):
             enc_output = self.uni_enc(enc_output, lengths_seq_src)
             lengths_seq_src[:] = self.uni_steps
 
+            if self.uni_switch or self.uni_coeff:
+                _, sent_sort_idx = lengths_seq_tgt_ori.sort(descending=True)
+                enc_output_tgt = self.encoder(tgt_seq_ori[sent_sort_idx], lengths_seq_tgt_ori[sent_sort_idx])
+                enc_output_tgt = self.uni_enc(enc_output_tgt, lengths_seq_tgt_ori[sent_sort_idx])
+
+                
+                mask = torch.rand(enc_output.size()[:2])
+                mask = mask >= self.uni_switch
+                mask = mask.type(self.tt.FloatTensor)
+                mask = mask[:,:,None]
+                
+                enc_output.data = (mask * enc_output.data) + ((1 - mask) * enc_output_tgt.data)
+                #import ipdb; ipdb.set_trace()
+
+
         tgt_lang_seq_forDec = tgt_lang_seq if self.dec_lang else None
         tgt_lang_oneHot_forDec = self.lang2oneHot(tgt_lang_seq, self.tgtLangIdx2oneHotIdx) if self.dec_tgtLang_oh else None
 
@@ -664,9 +680,9 @@ class NMTmodelRNN(nn.Module):
         dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq, tgt_lang_seq_forDec, tgt_lang_oneHot_forDec)
         #################################################
         if self.uni_coeff and self.uni_steps:
-            _, sent_sort_idx = lengths_seq_tgt_ori.sort(descending=True)
-            enc_output_tgt = self.encoder(tgt_seq_ori[sent_sort_idx], lengths_seq_tgt_ori[sent_sort_idx])
-            enc_output_tgt = self.uni_enc(enc_output_tgt, lengths_seq_tgt_ori[sent_sort_idx])
+            #_, sent_sort_idx = lengths_seq_tgt_ori.sort(descending=True)
+            #enc_output_tgt = self.encoder(tgt_seq_ori[sent_sort_idx], lengths_seq_tgt_ori[sent_sort_idx])
+            #enc_output_tgt = self.uni_enc(enc_output_tgt, lengths_seq_tgt_ori[sent_sort_idx])
             _, sent_revert_idx = sent_sort_idx.sort()
             sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
             enc_output_tgt = enc_output_tgt[sent_revert_idx]

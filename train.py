@@ -346,6 +346,7 @@ def load_model(opt):
         use_pos_emb=opt.use_pos_emb,
         uni_crit=opt.uni_crit,
         uni_margin=opt.uni_margin,
+        uni_switch=opt.uni_switch,
         cuda=opt.cuda)
 
     opt.lr = model_opt.lr
@@ -459,6 +460,8 @@ def main():
     parser.add_argument('-uni_crit', default='cossim')
     parser.add_argument('-uni_margin', default=1, type=int)
     parser.add_argument('-use_pos_emb', action='store_true')
+    parser.add_argument('-uni_switch', type=float, default=0.)
+
     opt = parser.parse_args()
 
     assert not (opt.dec_lang and opt.dec_tgtLang_oh)
@@ -560,6 +563,7 @@ def main():
             use_pos_emb=opt.use_pos_emb,
             uni_crit=opt.uni_crit,
             uni_margin=opt.uni_margin,
+            uni_switch=opt.uni_switch,
             cuda=opt.cuda)
 
         #print(modelRNN)
