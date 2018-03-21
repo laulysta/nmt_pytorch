@@ -108,7 +108,6 @@ class UniversalEncoder(nn.Module):
     def __init__(self, d_ctx, uni_steps, uni_norm=False, use_pos_emb=False, cuda=False):
         super(UniversalEncoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
-        #import ipdb; ipdb.set_trace()
         self.keys = nn.Parameter( self.tt.FloatTensor(uni_steps, d_ctx))
         self.keys.data = torch.from_numpy(norm_weight(d_ctx, uni_steps, ortho=False).T) # init the weights
 
@@ -133,7 +132,6 @@ class UniversalEncoder(nn.Module):
         xmask = xlen_to_mask_rnn(h_in_len.tolist(), self.tt) # (batch_size, x_seq_len)
 
         #score.data.masked_fill_(xmask, -float('inf'))
-        #import ipdb; ipdb.set_trace()
         if self.use_pos_emb:
             keys = self.keys + self.position_emb
         else:
@@ -167,7 +165,7 @@ class EncoderFast(nn.Module):
         super(EncoderFast, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
-        #import ipdb; ipdb.set_trace()
+
         self.emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
         emb_init_weights(self.emb, n_src_vocab, d_word_vec)
 
@@ -272,7 +270,6 @@ class Encoder(nn.Module):
         for ii, seq_len in enumerate(x_in_lens):
             tmp = x_in_emb[ii,:seq_len,:]
             x_in_emb_r[ii,:seq_len,:] = flip(tmp, 0)
-        #import ipdb; ipdb.set_trace()
         # Add tgt_lang rep
         if l_in is not None:
             l_in_emb = self.emb(l_in)
@@ -341,7 +338,6 @@ class Decoder(nn.Module):
         rnn_init_weights(self.rnn, d_model, d_word_vec+d_ctx+nb_lang_tgt)
 
         self.drop = nn.Dropout(p=dropout)
-        #import ipdb; ipdb.set_trace()
         self.ctx_to_s0 = nn.Linear(d_ctx, n_layers * d_model)
         layer_init_weights(self.ctx_to_s0, d_ctx, n_layers * d_model)
 
@@ -360,7 +356,7 @@ class Decoder(nn.Module):
         layer_init_weights(self.c_to_fin, d_ctx, d_word_vec, bias=False)
         self.s_to_fin = nn.Linear(d_model, d_word_vec, bias=False)
         layer_init_weights(self.s_to_fin, d_model, d_word_vec, bias=False)
-        #import ipdb; ipdb.set_trace()
+
         if no_proj_share_weight:
             self.fin_to_voc = nn.Linear(d_word_vec, n_tgt_vocab)
             layer_init_weights(self.fin_to_voc, d_word_vec, n_tgt_vocab, scale=0.5)
@@ -389,8 +385,6 @@ class Decoder(nn.Module):
         h_in_len = h_in_len.data.view(-1)
         xmask = xlen_to_mask_rnn(h_in_len.tolist(), self.tt) # (batch_size, x_seq_len)
 
-        #import ipdb; ipdb.set_trace()
-
         s_0_ = torch.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
         s_0_ = torch.div( s_0_, Variable(self.tt.FloatTensor(h_in_len.tolist()).view(-1,1)) )
         s_0 = self.ctx_to_s0(s_0_)
@@ -401,7 +395,7 @@ class Decoder(nn.Module):
 
         y_in_emb = self.emb(y_in) # (batch_size, y_seq_len, d_word_vec)
         y_in_emb = self.drop(y_in_emb) # (batch_size, y_seq_len, d_word_vec)
-        #import ipdb; ipdb.set_trace()
+
         if l_in is not None:
             l_in_emb = self.emb(l_in)
             y_in_emb = torch.cat((l_in_emb, y_in_emb), dim=1) # (batch_size, x_seq_len+1, D_emb)
@@ -410,7 +404,7 @@ class Decoder(nn.Module):
         if tgt_lang_oneHot is not None:
             tmp = tgt_lang_oneHot[:,None,:].repeat(1,y_seq_len,1)
             y_in_emb_andMore = torch.cat((tmp, y_in_emb), dim=2)
-        #import ipdb; ipdb.set_trace()
+
         h_in_big = h_in.view(-1, self.d_ctx) \
                 # (batch_size * x_seq_len, d_ctx) 
 
@@ -421,7 +415,7 @@ class Decoder(nn.Module):
         for idx in range(y_seq_len):
             ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, -1) \
                     # (batch_size, d_model * n_layers)
-            #import ipdb; ipdb.set_trace()
+
             ctx_y = self.y_to_ctx( y_in_emb[:,idx,:] )[:,None,:] # (batch_size, 1, d_ctx)
             ctx_s = self.s_to_ctx( ctx_s_t_ )[:,None,:]
             ctx = F.tanh(ctx_y + ctx_s + ctx_h) # (batch_size, x_seq_len, d_ctx)
@@ -441,14 +435,6 @@ class Decoder(nn.Module):
                 out, s_t = self.rnn( torch.cat((y_in_emb_andMore[:,idx,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
             else:
                 out, s_t = self.rnn( torch.cat((y_in_emb[:,idx,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
-            ####################################################
-            #s_t = self.rnn( torch.cat((c_t, y_in_emb[:,idx,:]), dim=1), s_tm1[0] )
-            #s_t = self.drop(s_t)
-            #out = s_t[:,None,:]
-            #s_t = s_t[None,:,:]
-            ####################################################
-            # out (batch_size, 1, d_model)
-            # s_t (n_layers, batch_size, d_model)
 
             fin_y = self.y_to_fin( y_in_emb[:,idx,:] ) # (batch_size, d_word_vec)
             fin_c = self.c_to_fin( c_t ) # (batch_size, d_word_vec)
@@ -475,7 +461,7 @@ class Decoder(nn.Module):
         # h_in : (batch_size, x_seq_len, d_ctx)
         # h_in_len : (batch_size)
         h_in_len = h_in_len.data.view(-1).tolist()
-        #import ipdb; ipdb.set_trace()
+
         batch_size, x_seq_len = h_in.size()[0], h_in.size()[1]
         xmask = xlen_to_mask_rnn(h_in_len, self.tt) # (batch_size, x_seq_len)
 
@@ -639,7 +625,6 @@ class NMTmodelRNN(nn.Module):
             oh[ii][idx] = 1.0
 
 
-        #import ipdb; ipdb.set_trace()
         oh = Variable(oh)
 
         return oh
@@ -668,7 +653,6 @@ class NMTmodelRNN(nn.Module):
             enc_output = self.uni_enc(enc_output, lengths_seq_src)
             lengths_seq_src[:] = self.uni_steps
 
-        #import ipdb; ipdb.set_trace()
         tgt_lang_seq_forDec = tgt_lang_seq if self.dec_lang else None
         tgt_lang_oneHot_forDec = self.lang2oneHot(tgt_lang_seq, self.tgtLangIdx2oneHotIdx) if self.dec_tgtLang_oh else None
 

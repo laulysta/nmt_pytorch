@@ -76,7 +76,7 @@ class MainModel(nn.Module):
         return loss, pred
 
 
-def train_epoch(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, patience_count, nb_examples_seen, pct_next_save):
+def train_epoch(model, training_data, crit, optimizer, opt, epoch_i, best_BLEU, patience_count, nb_examples_seen, pct_next_save):
     ''' Epoch operation in training phase'''
 
     start = time.time()
@@ -144,7 +144,6 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
         n_total_words += n_words
         n_total_correct += n_correct
         total_loss += ce_loss.data[0]
-        #import ipdb; ipdb.set_trace()
         if opt.uni_coeff and opt.uni_steps:
             total_sim_loss += sim_loss.data[0]
             n_total_sim += len(src[0])*opt.uni_steps
@@ -163,17 +162,7 @@ def train_epoch(model, training_data, validation_data, validation_data_translate
             pct_next_save += opt.save_freq_pct
             nb_examples_save = training_data.nb_examples*pct_next_save
             epoch_i += opt.save_freq_pct
-            best_BLEU, patience_count, optimizer = save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU, patience_count)
-
-            # if opt.optim == 'adam' and patience_count == opt.adam_patience:
-            #     bestModelName = opt.save_model + '_best.chkpt'
-            #     checkpoint = torch.load(bestModelName)
-            #     model.model.load_state_dict(checkpoint['model'])
-            #     epoch_i -= opt.adam_patience * opt.save_freq_pct
-            #     opt.lr = opt.lr/2
-            #     optimizer = optim.Adam(model.model.parameters(),
-            #                     lr=opt.lr, betas=(0.9, 0.98), eps=1e-09)
-            #     patience_count = 0
+            best_BLEU, patience_count, optimizer = save_model_and_validation_BLEU(opt, model, optimizer, training_data.src_word2idx, training_data.tgt_word2idx, epoch_i, best_BLEU, patience_count)
 
             model.train()
 
@@ -220,7 +209,7 @@ def eval_epoch(model, validation_data, crit, opt):
 
     return total_loss/n_total_words, n_total_correct/n_total_words
 
-def train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, patience_count):
+def train(model, training_data, validation_data, crit, optimizer, opt, epoch_i, best_BLEU, patience_count):
     ''' Start training '''
 
     nb_examples_seen = 0
@@ -230,8 +219,7 @@ def train(model, training_data, validation_data, validation_data_translate, crit
     for ii in range(opt.epoch):
         print('[ Starting epoch', epoch_i+1, ']')
 
-        train_loss, train_accu, epoch_i, best_BLEU, patience_count, optimizer, nb_examples_seen, pct_next_save = train_epoch(model, training_data, validation_data,
-                                                                                                            validation_data_translate, crit, optimizer, opt,
+        train_loss, train_accu, epoch_i, best_BLEU, patience_count, optimizer, nb_examples_seen, pct_next_save = train_epoch(model, training_data, crit, optimizer, opt,
                                                                                                             epoch_i, best_BLEU, patience_count, nb_examples_seen, pct_next_save)
         start = time.time()
         valid_loss, valid_accu = eval_epoch(model, validation_data, crit, opt)
@@ -243,7 +231,7 @@ def train(model, training_data, validation_data, validation_data_translate, crit
         valid_accus += [valid_accu]
 
 
-def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, validation_data_translate, epoch_i, best_BLEU, patience_count, valid_accu=None, valid_accus=None):
+def save_model_and_validation_BLEU(opt, model, optimizer, src_word2idx, tgt_word2idx, epoch_i, best_BLEU, patience_count, valid_accu=None, valid_accus=None):
     print('[ Epoch', epoch_i, ']')
     model.eval()
 
@@ -259,8 +247,8 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
 
     output_name = model_name + '.output.dev'
     bleu_file = os.path.dirname(model_name) + '/bleu_scores.txt'
-    valid_BLEU = translate_data(model_translate, validation_data_translate, output_name, opt, opt.valid_bleu_ref, bleu_file_name=bleu_file)
-    #import ipdb; ipdb.set_trace()
+    #valid_BLEU = translate_data(model_translate, validation_data_translate, output_name, opt, opt.valid_bleu_ref, bleu_file_name=bleu_file)
+    
     ###########################################################################################################################
     if opt.extra_valid_src and opt.extra_valid_tgt: # and opt.extra_valid_tgtLang:
         assert len(opt.extra_valid_src) == len(opt.extra_valid_tgt)
@@ -274,11 +262,16 @@ def save_model_and_validation_BLEU(opt, model, optimizer, validation_data, valid
         else:
             opt.extra_valid_srcLang = [None] * len(opt.extra_valid_src)
 
+        with open(bleu_file, 'a') as f:
+            f.write('Epoch: %.3f , lr: %f\n' % (epoch_i, opt.lr))
+
         for ii, (src_path, tgt_path, srcLang_path, tgtLang_path) in enumerate(zip(opt.extra_valid_src, opt.extra_valid_tgt, opt.extra_valid_srcLang, opt.extra_valid_tgtLang)):
-            data_set = prepare_data(src_path, validation_data.src_word2idx, validation_data.tgt_word2idx, opt, srcLang_path=srcLang_path, tgtLang_path=tgtLang_path)
-            extra_bleu_file_name = os.path.dirname(model_name) + '/bleu_scores_extra' + str(ii+1) + '.txt'
+            data_set = prepare_data(src_path, src_word2idx, tgt_word2idx, opt, srcLang_path=srcLang_path, tgtLang_path=tgtLang_path)
+            #extra_bleu_file_name = os.path.dirname(model_name) + '/bleu_scores_extra' + str(ii+1) + '.txt'
             extra_output_name = output_name + '_extra' + str(ii+1)
-            translate_data(model_translate, data_set, extra_output_name, opt, tgt_path, bleu_file_name=extra_bleu_file_name)
+            res = translate_data(model_translate, data_set, extra_output_name, opt, tgt_path, bleu_file_name=bleu_file)
+            if ii == 0:
+                valid_BLEU = res
 
     ###########################################################################################################################
     model_state_dict = model_translate.state_dict()
@@ -375,7 +368,6 @@ def load_model(opt):
 
 def dict_lang(lang_data):
     lang_token_idx = set()
-    #import ipdb; ipdb.set_trace()
     for ii in lang_data:
         lang_token_idx.add(ii[0])
     list_lang_idx = list(lang_token_idx)
@@ -390,7 +382,6 @@ def dict_lang(lang_data):
 
 def nb_lang(lang_data):
     lang_token_idx = set()
-    #import ipdb; ipdb.set_trace()
     for ii in lang_data:
         lang_token_idx.add(ii[0])
     
@@ -510,19 +501,7 @@ def main():
         is_train=False,
         sort_by_length=True)
 
-    validation_data_translate = DataLoader(
-        data['dict']['src'],
-        data['dict']['tgt'],
-        src_insts=data['valid']['src'],
-        tgt_insts=None,
-        src_lang_insts=(data['valid']['src_lang'] if opt.source_lang else None),
-        tgt_lang_insts=(data['valid']['tgt_lang'] if opt.target_lang else None),
-        batch_size=opt.valid_batch_size,
-        shuffle=False,
-        cuda=opt.cuda,
-        is_train=False,
-        sort_by_length=False)
-
+    
     opt.src_vocab_size = training_data.src_vocab_size
     opt.tgt_vocab_size = training_data.tgt_vocab_size
 
@@ -613,7 +592,7 @@ def main():
     if opt.multi_gpu:
         model = nn.DataParallel(model)
 
-    train(model, training_data, validation_data, validation_data_translate, crit, optimizer, opt, epoch_i, best_BLEU, patience_count)
+    train(model, training_data, validation_data, crit, optimizer, opt, epoch_i, best_BLEU, patience_count)
 
 if __name__ == '__main__':
     main()
