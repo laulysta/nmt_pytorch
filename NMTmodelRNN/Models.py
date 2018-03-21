@@ -664,7 +664,6 @@ class NMTmodelRNN(nn.Module):
 
        
         enc_output = self.encoder(src_seq, lengths_seq_src, tgt_lang_seq_forEnc, src_lang_oneHot_forEnc, tgt_lang_oneHot_forEnc)
-        import ipdb; ipdb.set_trace()
         if self.uni_steps:
             enc_output = self.uni_enc(enc_output, lengths_seq_src)
             lengths_seq_src[:] = self.uni_steps
