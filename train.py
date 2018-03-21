@@ -202,7 +202,6 @@ def train(model, training_data, validation_data, crit, optimizer, opt, epoch_i, 
     valid_accus = []
     for ii in range(opt.epoch):
         print('[ Starting epoch', epoch_i+1, ']')
-        import ipdb; ipdb.set_trace()
 
         train_loss, train_accu, epoch_i, best_BLEU, patience_count, optimizer, nb_examples_seen, pct_next_save = train_epoch(model, training_data, crit, optimizer, opt,
                                                                                                             epoch_i, best_BLEU, patience_count, nb_examples_seen, pct_next_save)
@@ -410,9 +409,6 @@ def main():
     parser.add_argument('-no_reload', action='store_true')
 
     parser.add_argument('-reload_model', required=False, default='')
-
-    parser.add_argument('-valid_bleu_ref', type=str, default='',
-                        help='Path to the reference')
 
     parser.add_argument('-external_validation_script', type=str, default=None, metavar='PATH', nargs='*',
                          help="location of validation script (to run your favorite metric for validation) (default: %(default)s)")
