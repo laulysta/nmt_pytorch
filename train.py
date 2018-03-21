@@ -344,6 +344,8 @@ def load_model(opt):
         uni_coeff=model_opt.uni_coeff,
         uni_norm=model_opt.uni_norm,
         use_pos_emb=opt.use_pos_emb,
+        uni_crit=opt.uni_crit,
+        uni_margin=opt.uni_margin,
         cuda=opt.cuda)
 
     opt.lr = model_opt.lr
@@ -454,6 +456,8 @@ def main():
     parser.add_argument('-uni_steps', type=int, default=0)
     parser.add_argument('-uni_coeff', type=float, default=0.)
     parser.add_argument('-uni_norm', action='store_true')
+    parser.add_argument('-uni_crit', default='cossim')
+    parser.add_argument('-uni_margin', default=1, type=int)
     parser.add_argument('-use_pos_emb', action='store_true')
     opt = parser.parse_args()
 
@@ -554,6 +558,8 @@ def main():
             uni_coeff=opt.uni_coeff,
             uni_norm=opt.uni_norm,
             use_pos_emb=opt.use_pos_emb,
+            uni_crit=opt.uni_crit,
+            uni_margin=opt.uni_margin,
             cuda=opt.cuda)
 
         #print(modelRNN)

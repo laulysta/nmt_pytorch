@@ -568,12 +568,16 @@ class NMTmodelRNN(nn.Module):
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
             enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False,
-            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, uni_steps=0, uni_coeff=0., uni_norm=False, use_pos_emb=False, cuda=False):
+            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={},
+            uni_steps=0, uni_coeff=0., uni_norm=False, use_pos_emb=False, uni_crit='cossim', uni_margin=1,
+            cuda=False):
 
 
         self.n_layers = n_layers
         self.uni_steps = uni_steps
         self.uni_coeff = uni_coeff
+        self.uni_crit = uni_crit
+        self.uni_margin = uni_margin
 
         super(NMTmodelRNN, self).__init__()
 
@@ -658,7 +662,6 @@ class NMTmodelRNN(nn.Module):
 
         
         dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq, tgt_lang_seq_forDec, tgt_lang_oneHot_forDec)
-
         #################################################
         if self.uni_coeff and self.uni_steps:
             _, sent_sort_idx = lengths_seq_tgt_ori.sort(descending=True)
@@ -670,7 +673,18 @@ class NMTmodelRNN(nn.Module):
             #sim_loss = ((enc_output - enc_output_tgt)**2).sum()
             norm1 = torch.norm(enc_output, p=2, dim=2)
             norm2 = torch.norm(enc_output_tgt, p=2, dim=2)
-            sim_loss = -( (enc_output*enc_output_tgt).sum(dim=2)/(norm1*norm2) ).sum()
+            if self.uni_crit == 'cossim':
+                sim_loss = -( (enc_output*enc_output_tgt).sum(dim=2)/(norm1*norm2) ).sum()
+            elif self.uni_crit == 'cossim_margin':
+                perm = torch.randperm(len(enc_output))
+                enc_output_tgt_perm = enc_output_tgt[perm]
+                norm2_perm = norm2[perm]
+
+                pos_ = (enc_output*enc_output_tgt).sum(dim=2)/(norm1*norm2)
+                neg_ = (enc_output*enc_output_tgt_perm).sum(dim=2)/(norm1*norm2_perm)
+
+                sim_loss = self.uni_margin - pos_ + neg_
+                sim_loss = sim_loss.clamp(min=0.).sum()
 
             return dec_output, sim_loss
 
