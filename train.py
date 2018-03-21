@@ -402,7 +402,7 @@ def main():
 
     parser.add_argument('-sch_optim', action='store_true')
 
-    parser.add_argument('-lr', type=float, default=0.001)
+    parser.add_argument('-lr', type=float, default=0.0001)
 
     parser.add_argument('-no_reload_optimizer', action='store_true')
 
