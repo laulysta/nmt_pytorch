@@ -693,6 +693,8 @@ class NMTmodelRNN(nn.Module):
                 sim_loss = -( (enc_output*enc_output_tgt).sum(dim=2)/(norm1*norm2) ).sum()
             elif self.uni_crit == 'cossim_margin':
                 perm = torch.randperm(len(enc_output))
+                if enc_output_tgt.is_cuda:
+                    perm = perm.cuda()
                 enc_output_tgt_perm = enc_output_tgt[perm]
                 norm2_perm = norm2[perm]
 
