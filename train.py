@@ -27,6 +27,7 @@ from torch.autograd import Variable
 import subprocess
 
 from validate import prepare_data, translate_data
+import pickle
 
 def get_loss(crit, pred, gold, opt, smoothing_eps=0.1):
     ''' Apply label smoothing if needed '''
@@ -477,7 +478,13 @@ def main():
     opt.source_lang = True if opt.enc_srcLang_oh else False
 
     #========= Loading Dataset =========#
-    data = torch.load(opt.data)
+    if opt.data[-3:] == '.pt':
+        data = torch.load(opt.data)
+    elif opt.data[-4:] == '.pkl':
+        with open(opt.data, 'rb') as f:
+            data = pickle.load(f)
+    else:
+        sys.exit('Wrong data file')
     opt.max_token_seq_len = data['settings'].max_token_seq_len
 
     #========= Preparing DataLoader =========#

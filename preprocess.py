@@ -4,6 +4,7 @@ import torch
 import NMTmodelRNN.Constants as Constants
 import numpy as np
 import sys
+import pickle
 
 def read_instances_from_file(inst_file, max_sent_len, keep_case):
     ''' Convert file into word seq lists and vocab '''
@@ -352,7 +353,9 @@ def main():
                 'tgt': valid_tgt_insts}}
 
     print('[Info] Dumping the processed data to pickle file', opt.save_data)
-    torch.save(data, opt.save_data)
+    #torch.save(data, opt.save_data)
+    with open(opt.save_data, 'wb') as f:
+        pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
     print('[Info] Finish.')
 
 if __name__ == '__main__':

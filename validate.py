@@ -244,7 +244,13 @@ def main():
     opt.target_lang = model_opt.target_lang
 
     #========= Loading Dataset =========#
-    data = torch.load(opt.data_dict)
+    if opt.data_dict[-3:] == '.pt':
+        data = torch.load(opt.data_dict)
+    elif opt.data_dict[-4:] == '.pkl':
+        with open(opt.data_dict, 'rb') as f:
+            data = pickle.load(f)
+    else:
+        sys.exit('Wrong data file')
     src_word2idx, tgt_word2idx = data['dict']['src'], data['dict']['tgt']
     
     data_set = prepare_data(opt.val, src_word2idx, tgt_word2idx, opt, tgtLang_path=opt.val_tgtlang, srcLang_path=opt.val_srclang)
