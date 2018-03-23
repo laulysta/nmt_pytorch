@@ -16,7 +16,7 @@ class DataLoaderMulti(object):
             maxibatch_size=20):
 
         assert src_insts
-        assert tgt_lang_insts
+        assert tgt_lang_insts is not None
         assert len(src_insts) >= batch_size
 
         if tgt_insts:
@@ -182,14 +182,14 @@ class DataLoaderMulti(object):
             ''' Pad the instance to the max seq length in batch '''
 
             max_len = max(len(inst) for inst in insts)
-
+            
             inst_data = np.array([
-                inst + [Constants.PAD] * (max_len - len(inst))
-                for inst in insts])
+                list(inst) + [Constants.PAD] * (max_len - len(inst))
+                for inst in insts], dtype=np.int64)
 
             inst_position = np.array([
                 [pos_i+1 if w_i != Constants.PAD else 0 for pos_i, w_i in enumerate(inst)]
-                for inst in inst_data])
+                for inst in inst_data], dtype=np.int64)
 
             inst_data_tensor = Variable(torch.LongTensor(inst_data), volatile=(not self.is_train))
             inst_position_tensor = Variable(torch.LongTensor(inst_position), volatile=(not self.is_train))
@@ -215,15 +215,15 @@ class DataLoaderMulti(object):
                     tgt_insts = []
                     tgt_lang_insts = []
                     src_lang_insts = []
-
+                    
                     for ii, start_idx in enumerate(self._starts):
                         end_idx = start_idx + self._batch_size * self._maxibatch_size // self._n_langs
                         src_insts += self._sources[ii][start_idx:end_idx]
                         tgt_insts += self._targets[ii][start_idx:end_idx]
                         if self._languages:
-                            tgt_lang_insts += self._languages[ii][start_idx:end_idx]
+                            tgt_lang_insts += list(self._languages[ii][start_idx:end_idx])
                         if self._src_langs:
-                            src_lang_insts += self._src_langs[ii][start_idx:end_idx]
+                            src_lang_insts += list(self._src_langs[ii][start_idx:end_idx])
                         if end_idx < len(self._sources[ii]):
                             self._starts[ii] = end_idx
                         else:
@@ -232,9 +232,9 @@ class DataLoaderMulti(object):
                             src_insts += self._sources[ii][:delta]
                             tgt_insts += self._targets[ii][:delta]
                             if self._languages:
-                                tgt_lang_insts += self._languages[ii][:delta]
+                                tgt_lang_insts += list(self._languages[ii][:delta])
                             if self._src_langs:
-                                src_lang_insts += self._src_langs[ii][:delta]
+                                src_lang_insts += list(self._src_langs[ii][:delta])
                             self._starts[ii] = delta
 
 
