@@ -31,7 +31,7 @@ class DataLoader(object):
         self._tgt_insts = tgt_insts
         self._tgt_lang_insts = tgt_lang_insts
 
-        if src_lang_insts:
+        if src_lang_insts is not None:
             src_lang_dict = {}
             src_val = 0
             new_src_lang_insts = []
@@ -107,8 +107,8 @@ class DataLoader(object):
     def shuffle(self):
         ''' Shuffle data for a brand new start '''
         if self._tgt_insts:
-            if self._src_lang_insts:
-                if self._tgt_lang_insts:
+            if self._src_lang_insts is not None:
+                if self._tgt_lang_insts is not None:
                     paired_insts = list(zip(self._src_insts, self._tgt_insts, self._src_lang_insts, self._tgt_lang_insts))
                     random.shuffle(paired_insts)
                     self._src_insts, self._tgt_insts, self._src_lang_insts, self._tgt_lang_insts = zip(*paired_insts)
@@ -117,7 +117,7 @@ class DataLoader(object):
                     random.shuffle(paired_insts)
                     self._src_insts, self._tgt_insts, self._src_lang_insts = zip(*paired_insts)
             else:
-                if self._tgt_lang_insts:
+                if self._tgt_lang_insts is not None:
                     paired_insts = list(zip(self._src_insts, self._tgt_insts, self._tgt_lang_insts))
                     random.shuffle(paired_insts)
                     self._src_insts, self._tgt_insts, self._tgt_lang_insts = zip(*paired_insts)
@@ -126,7 +126,7 @@ class DataLoader(object):
                     random.shuffle(paired_insts)
                     self._src_insts, self._tgt_insts = zip(*paired_insts)
         else: # Valid or test
-            if self._tgt_lang_insts:
+            if self._tgt_lang_insts is not None:
                 paired_insts = list(zip(self._src_insts, self._tgt_lang_insts))
                 random.shuffle(paired_insts)
                 self._src_insts, self._tgt_lang_insts = zip(*paired_insts)
@@ -152,12 +152,12 @@ class DataLoader(object):
             max_len = max(len(inst) for inst in insts)
 
             inst_data = np.array([
-                inst + [Constants.PAD] * (max_len - len(inst))
-                for inst in insts])
+                list(inst) + [Constants.PAD] * (max_len - len(inst))
+                for inst in insts], dtype=np.int64)
 
             inst_position = np.array([
                 [pos_i+1 if w_i != Constants.PAD else 0 for pos_i, w_i in enumerate(inst)]
-                for inst in inst_data])
+                for inst in inst_data], dtype=np.int64)
 
             inst_data_tensor = Variable(torch.LongTensor(inst_data), volatile=(not self.is_train))
             inst_position_tensor = Variable(torch.LongTensor(inst_position), volatile=(not self.is_train))
@@ -191,10 +191,10 @@ class DataLoader(object):
                     self._sbuf = [src_insts[i] for i in sidx]
                     self._tbuf = [tgt_insts[i] for i in sidx]
 
-                    if self._src_lang_insts:
+                    if self._src_lang_insts is not None:
                         src_lang_insts = self._src_lang_insts[start_idx:end_idx]
                         self._slbuf = [src_lang_insts[i] for i in sidx]
-                    if self._tgt_lang_insts:
+                    if self._tgt_lang_insts is not None:
                         tgt_lang_insts = self._tgt_lang_insts[start_idx:end_idx]
                         self._cbuf = [tgt_lang_insts[i] for i in sidx]
 
@@ -207,19 +207,19 @@ class DataLoader(object):
                 cur_tgt_insts = self._tbuf[cur_start:cur_end]
                 tgt_data, tgt_pos = pad_to_longest(cur_tgt_insts)
 
-                if self._src_lang_insts:
+                if self._src_lang_insts is not None:
                     cur_src_lang_insts = self._slbuf[cur_start:cur_end]
                     src_lang_data, src_lang_pos = pad_to_longest(cur_src_lang_insts)
 
-                if self._tgt_lang_insts:
+                if self._tgt_lang_insts is not None:
                     cur_tgt_lang_insts = self._cbuf[cur_start:cur_end]
                     tgt_lang_data, tgt_lang_pos = pad_to_longest(cur_tgt_lang_insts)
-                    if self._src_lang_insts:
+                    if self._src_lang_insts is not None:
                         return (src_data, src_pos), (tgt_data, tgt_pos), (src_lang_data, src_lang_pos), (tgt_lang_data, tgt_lang_pos)
                     else:
                         return (src_data, src_pos), (tgt_data, tgt_pos), (tgt_lang_data, tgt_lang_pos)
                 else:
-                    if self._src_lang_insts:
+                    if self._src_lang_insts is not None:
                         return (src_data, src_pos), (tgt_data, tgt_pos), (src_lang_data, src_lang_pos)
                     else:
                         return (src_data, src_pos), (tgt_data, tgt_pos)
@@ -230,35 +230,35 @@ class DataLoader(object):
                 src_insts = self._src_insts[start_idx:end_idx]
                 src_data, src_pos = pad_to_longest(src_insts)
 
-                if self._src_lang_insts:
+                if self._src_lang_insts is not None:
                     src_lang_insts = self._src_lang_insts[start_idx:end_idx]
                     src_lang_data, src_lang_pos = pad_to_longest(src_lang_insts)
 
-                if self._tgt_lang_insts:
+                if self._tgt_lang_insts is not None:
                     tgt_lang_insts = self._tgt_lang_insts[start_idx:end_idx]
                     tgt_lang_data, tgt_lang_pos = pad_to_longest(tgt_lang_insts)
                 
                 if not self._tgt_insts:
-                    if self._tgt_lang_insts:
-                        if self._src_lang_insts:
+                    if self._tgt_lang_insts is not None:
+                        if self._src_lang_insts is not None:
                             return (src_data, src_pos), (src_lang_data, src_lang_pos), (tgt_lang_data, tgt_lang_pos)
                         else:
                             return (src_data, src_pos), (tgt_lang_data, tgt_lang_pos)
                     else:
-                        if self._src_lang_insts:
+                        if self._src_lang_insts is not None:
                             return (src_data, src_pos), (src_lang_data, src_lang_pos)
                         else:
                             return src_data, src_pos
                 else:
                     tgt_insts = self._tgt_insts[start_idx:end_idx]
                     tgt_data, tgt_pos = pad_to_longest(tgt_insts)
-                    if self._tgt_lang_insts:
-                         if self._src_lang_insts:
+                    if self._tgt_lang_insts is not None:
+                         if self._src_lang_insts is not None:
                             return (src_data, src_pos), (tgt_data, tgt_pos), (src_lang_data, src_lang_pos), (tgt_lang_data, tgt_lang_pos)
                          else:
                             return (src_data, src_pos), (tgt_data, tgt_pos), (tgt_lang_data, tgt_lang_pos)
                     else:
-                         if self._src_lang_insts:
+                         if self._src_lang_insts is not None:
                             return (src_data, src_pos), (tgt_data, tgt_pos), (src_lang_data, src_lang_pos)
                          else:
                             return (src_data, src_pos), (tgt_data, tgt_pos)
