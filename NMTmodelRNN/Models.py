@@ -159,6 +159,66 @@ class UniversalEncoder(nn.Module):
             c_t = F.normalize(c_t, p=2, dim=2)
         return c_t
 
+class MemEffUniversalEncoder(nn.Module):
+    def __init__(self, d_ctx, uni_steps, uni_norm=False, use_pos_emb=False, cuda=False):
+        super(MemEffUniversalEncoder, self).__init__()
+        self.tt = torch.cuda if cuda else torch
+        self.keys = nn.Parameter( self.tt.FloatTensor(uni_steps, d_ctx))
+        self.keys.data = torch.from_numpy(norm_weight(d_ctx, uni_steps, ortho=False).T) # init the weights
+
+        self.position_emb = Variable(self.tt.FloatTensor(uni_steps, d_ctx))
+        self.position_emb.data = position_encoding_init(uni_steps, d_ctx, self.tt)
+        
+        self.d_ctx = d_ctx
+        self.uni_steps = uni_steps
+        self.uni_norm = uni_norm
+        self.use_pos_emb = use_pos_emb
+
+        self.k_to_ctx = nn.Linear(d_ctx, d_ctx)
+        layer_init_weights(self.k_to_ctx, d_ctx, d_ctx)
+        self.h_to_ctx = nn.Linear(d_ctx, d_ctx, bias=False)
+        layer_init_weights(self.h_to_ctx, d_ctx, d_ctx, bias=False)
+        self.ctx_to_score = nn.Linear(d_ctx, 1)
+        layer_init_weights(self.ctx_to_score, d_ctx, 1)
+
+    def forward(self, h_in, h_in_len):
+        
+        h_in_len = h_in_len.data.view(-1)
+        xmask = xlen_to_mask_rnn(h_in_len.tolist(), self.tt) # (batch_size, x_seq_len)
+        batch_size = h_in.size()[0]
+
+        #score.data.masked_fill_(xmask, -float('inf'))
+        if self.use_pos_emb:
+            keys = self.keys + self.position_emb
+        else:
+            keys = self.keys
+        
+        ctx_h = self.h_to_ctx( h_in ) # (batch_size, x_seq_len, self.d_ctx)
+        ctx_k = self.k_to_ctx(keys) # (uni_steps, d_ctx)
+
+        atts = []
+        for idx in range(self.uni_steps):
+            ctx = F.tanh(ctx_h + ctx_k[idx][None, None, :])
+            ctx = ctx.view(-1, self.d_ctx) # (batch_size * x_seq_len, d_ctx)
+
+            score = self.ctx_to_score(ctx).view(batch_size, -1) # (batch_size, x_seq_len)
+            score.data.masked_fill_(xmask, -float('inf'))
+            score = F.softmax(score, dim=1)
+            score = score[:,:,None] # (batch_size, x_seq_len, 1)
+
+            c_t = torch.mul( h_in, score ) # (batch_size, x_seq_len, d_ctx)
+            c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
+
+            if self.uni_norm:
+                c_t = F.normalize(c_t, p=2, dim=1)
+
+            atts.append(c_t)
+
+        atts = torch.cat(atts, 0) # (uni_steps * batch_size, d_ctx)
+        atts = atts.view(self.uni_steps, batch_size, self.d_ctx).transpose(0,1).contiguous()
+
+        return atts
+
 class EncoderFast(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
                 d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
@@ -569,7 +629,8 @@ class NMTmodelRNN(nn.Module):
             no_proj_share_weight=True, embs_share_weight=True,
             enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False,
             srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={},
-            uni_steps=0, uni_coeff=0., uni_norm=False, use_pos_emb=False, uni_crit='cossim', uni_margin=1, uni_switch=.0,
+            uni_steps=0, uni_coeff=0., uni_norm=False, use_pos_emb=False,
+            uni_crit='cossim', uni_margin=1, uni_switch=.0, uni_mem_eff=False,
             cuda=False):
 
 
@@ -578,6 +639,7 @@ class NMTmodelRNN(nn.Module):
         self.uni_coeff = uni_coeff
         self.uni_crit = uni_crit
         self.uni_margin = uni_margin
+        self.uni_mem_eff = uni_mem_eff
 
         super(NMTmodelRNN, self).__init__()
 
@@ -601,7 +663,8 @@ class NMTmodelRNN(nn.Module):
                                     dropout=dropout, cuda=cuda)
 
         if uni_steps:
-            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, uni_norm=uni_norm, use_pos_emb=use_pos_emb, cuda=cuda)
+            UniversalEnc = MemEffUniversalEncoder if self.uni_mem_eff else UniversalEncoder
+            self.uni_enc = UniversalEnc(d_model*2, uni_steps=uni_steps, uni_norm=uni_norm, use_pos_emb=use_pos_emb, cuda=cuda)
         self.uni_switch = uni_switch
 
         if embs_share_weight:

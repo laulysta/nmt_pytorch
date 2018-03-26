@@ -43,6 +43,12 @@ def load_model(opt):
         model_opt.uni_steps = 0
     if 'uni_coeff' not in checkpoint['settings']:
         model_opt.uni_coeff = 0.
+    if 'uni_norm' not in checkpoint['settings']:
+        model_opt.uni_norm = False
+    if 'use_pos_emb' not in checkpoint['settings']:
+        model_opt.use_pos_emb = False
+    if 'uni_mem_eff' not in checkpoint['settings']:
+        model_opt.uni_mem_eff = False
 
     modelRNN = NMTmodelRNN(
         model_opt.src_vocab_size,
@@ -54,7 +60,6 @@ def load_model(opt):
         d_word_vec=model_opt.d_word_vec,
         n_layers=model_opt.n_layers,
         dropout=model_opt.dropout,
-        share_enc_dec=model_opt.share_enc_dec,
         enc_lang= model_opt.enc_lang,
         dec_lang=model_opt.dec_lang,
         enc_srcLang_oh=model_opt.enc_srcLang_oh,
@@ -64,6 +69,9 @@ def load_model(opt):
         tgtLangIdx2oneHotIdx=model_opt.tgtLangIdx2oneHotIdx,
         uni_steps=model_opt.uni_steps,
         uni_coeff=model_opt.uni_coeff,
+        uni_norm=model_opt.uni_norm,
+        use_pos_emb=opt.use_pos_emb,
+        uni_mem_eff=opt.uni_mem_eff,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
