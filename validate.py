@@ -158,20 +158,18 @@ def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_
             tgt_lang_oneHot_forEnc = model_translate.lang2oneHot(tgt_lang_seq, model_opt.tgtLangIdx2oneHotIdx)[sent_sort_idx] if model_opt.enc_tgtLang_oh else None
 
             enc_output = model_translate.encoder(src_seq[sent_sort_idx], lengths_seq_src[sent_sort_idx],
-                tgt_lang_seq_forEnc, src_lang_oneHot_forEnc, tgt_lang_oneHot_forEnc)
+                l_in=tgt_lang_seq_forEnc, src_lang_oneHot=src_lang_oneHot_forEnc, tgt_lang_oneHot=tgt_lang_oneHot_forEnc)
 
             if model_opt.uni_steps:
                 enc_output = model_translate.uni_enc(enc_output, lengths_seq_src[sent_sort_idx])
                 lengths_seq_src[:] = model_translate.uni_steps
 
             tgt_lang_seq_forDec = tgt_lang_seq[sent_sort_idx] if model_opt.dec_lang else None
-            if model_opt.dec_tgtLang_oh:
-                tgt_lang_oneHot_forDec = model_translate.lang2oneHot(tgt_lang_seq, model_opt.tgtLangIdx2oneHotIdx)
-                tgt_lang_oneHot_forDec = tgt_lang_oneHot_forDec[sent_sort_idx]
-            else:
-                tgt_lang_oneHot_forDec = None
+            src_lang_oneHot_forDec = model_translate.lang2oneHot(src_lang_seq, model_opt.srcLangIdx2oneHotIdx)[sent_sort_idx] if model_opt.dec_srcLang_oh else None
+            tgt_lang_oneHot_forDec = model_translate.lang2oneHot(tgt_lang_seq, model_opt.tgtLangIdx2oneHotIdx)[sent_sort_idx] if model_opt.dec_tgtLang_oh else None
 
-            all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx], tgt_lang_seq_forDec, tgt_lang_oneHot_forDec)
+            all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx],
+                l_in=tgt_lang_seq_forDec, src_lang_oneHot=src_lang_oneHot_forDec, tgt_lang_oneHot=tgt_lang_oneHot_forDec)
 
             _, sent_revert_idx = sent_sort_idx.sort()
             sent_revert_idx = sent_revert_idx.data.view(-1).tolist()

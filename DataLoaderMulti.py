@@ -44,7 +44,7 @@ class DataLoaderMulti(object):
         targets = []
         tgt_langs = []
         src_langs = []
-        if src_lang_insts:
+        if src_lang_insts is not None:
             src_lang_dict = {}
             src_val = 0
             new_src_lang_insts = []

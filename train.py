@@ -338,6 +338,7 @@ def load_model(opt):
         dec_lang=model_opt.dec_lang,
         enc_srcLang_oh=model_opt.enc_srcLang_oh,
         enc_tgtLang_oh=model_opt.enc_tgtLang_oh,
+        dec_srcLang_oh=model_opt.dec_srcLang_oh,
         dec_tgtLang_oh=model_opt.dec_tgtLang_oh,
         srcLangIdx2oneHotIdx=model_opt.srcLangIdx2oneHotIdx,
         tgtLangIdx2oneHotIdx=model_opt.tgtLangIdx2oneHotIdx,
@@ -447,6 +448,7 @@ def main():
 
     parser.add_argument('-enc_srcLang_oh', action='store_true')
     parser.add_argument('-enc_tgtLang_oh', action='store_true')
+    parser.add_argument('-dec_srcLang_oh', action='store_true')
     parser.add_argument('-dec_tgtLang_oh', action='store_true')
 
     parser.add_argument('-balanced_data', action='store_true')
@@ -477,7 +479,7 @@ def main():
     #opt.d_word_vec = opt.d_model
 
     opt.target_lang = True if opt.enc_lang or opt.dec_lang or opt.dec_tgtLang_oh or opt.enc_tgtLang_oh else False
-    opt.source_lang = True if opt.enc_srcLang_oh else False
+    opt.source_lang = True if opt.enc_srcLang_oh or opt.dec_srcLang_oh else False
 
     #========= Loading Dataset =========#
     if opt.data[-3:] == '.pt':
@@ -523,7 +525,7 @@ def main():
 
     opt.tgtLangIdx2oneHotIdx = dict_lang(data['train']['tgt_lang']) if opt.dec_tgtLang_oh or opt.enc_tgtLang_oh else {}
 
-    if opt.enc_srcLang_oh:
+    if opt.enc_srcLang_oh or opt.dec_srcLang_oh:
         nb_src_lang = nb_lang(data['train']['src_lang'])
         opt.srcLangIdx2oneHotIdx = {}
         for ii in range(nb_src_lang):
@@ -563,6 +565,7 @@ def main():
             dec_lang=opt.dec_lang,
             enc_srcLang_oh=opt.enc_srcLang_oh,
             enc_tgtLang_oh=opt.enc_tgtLang_oh,
+            dec_srcLang_oh=opt.dec_srcLang_oh,
             dec_tgtLang_oh=opt.dec_tgtLang_oh,
             srcLangIdx2oneHotIdx=opt.srcLangIdx2oneHotIdx,
             tgtLangIdx2oneHotIdx=opt.tgtLangIdx2oneHotIdx,

@@ -221,7 +221,8 @@ class MemEffUniversalEncoder(nn.Module):
 
 class EncoderFast(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
-                d_word_vec=512, d_model=512, dropout=0.5, cuda=False):
+                d_word_vec=512, d_model=512, dropout=0.5,
+                nb_lang_src=0, nb_lang_tgt=0, cuda=False):
         super(EncoderFast, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -230,13 +231,13 @@ class EncoderFast(nn.Module):
         emb_init_weights(self.emb, n_src_vocab, d_word_vec)
 
         self.rnn = nn.GRU(
-                    input_size=d_word_vec,
+                    input_size=d_word_vec+nb_lang_src+nb_lang_tgt,
                     hidden_size=d_model,
                     num_layers=n_layers,
                     dropout=dropout,
                     batch_first=True,
                     bidirectional=True)
-        rnn_init_weights(self.rnn, d_model, d_word_vec)
+        rnn_init_weights(self.rnn, d_model, d_word_vec+nb_lang_src+nb_lang_tgt)
 
         self.drop = nn.Dropout(p=dropout)
         self.n_layers = n_layers
@@ -252,6 +253,14 @@ class EncoderFast(nn.Module):
                                             batch_size, self.d_model).zero_() )
         x_in_emb = self.emb(x_in) # (batch_size, x_seq_len, D_emb)
         x_in_emb = self.drop(x_in_emb)
+
+        if src_lang_oneHot is not None:
+            tmp = src_lang_oneHot[:,None,:].repeat(1,x_seq_len,1)
+            x_in_emb = torch.cat((tmp, x_in_emb), dim=2)
+
+        if tgt_lang_oneHot is not None:
+            tmp = tgt_lang_oneHot[:,None,:].repeat(1,x_seq_len,1)
+            x_in_emb = torch.cat((tmp, x_in_emb), dim=2)
 
         # Lengths data is wrapped inside a Variable.
         x_in_lens = x_in_lens.data.view(-1).tolist()
@@ -383,7 +392,8 @@ class Decoder(nn.Module):
     # Base recurrent attention-based decoder class.
     def __init__(
              self, n_tgt_vocab, n_max_seq, n_layers=2,
-             d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True, nb_lang_tgt=0, cuda=False):
+             d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True,
+             nb_lang_src=0, nb_lang_tgt=0, cuda=False):
         super(Decoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -393,9 +403,9 @@ class Decoder(nn.Module):
 
         
         #self.rnn = nn.GRUCell(d_ctx+d_word_vec, d_model)
-        self.rnn = nn.GRU(d_word_vec+d_ctx+nb_lang_tgt, d_model, \
+        self.rnn = nn.GRU(d_word_vec+d_ctx+nb_lang_src+nb_lang_tgt, d_model, \
                            n_layers, dropout=dropout, batch_first=True)
-        rnn_init_weights(self.rnn, d_model, d_word_vec+d_ctx+nb_lang_tgt)
+        rnn_init_weights(self.rnn, d_model, d_word_vec+d_ctx+nb_lang_src+nb_lang_tgt)
 
         self.drop = nn.Dropout(p=dropout)
         self.ctx_to_s0 = nn.Linear(d_ctx, n_layers * d_model)
@@ -436,7 +446,7 @@ class Decoder(nn.Module):
         self.d_word_vec = d_word_vec
         self.n_max_seq = n_max_seq
 
-    def forward(self, h_in, h_in_len, y_in, l_in=None, tgt_lang_oneHot=None):
+    def forward(self, h_in, h_in_len, y_in, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
         # h_in_len : (batch_size)
         # y_in : (batch_size, y_seq_len)
@@ -461,9 +471,15 @@ class Decoder(nn.Module):
             y_in_emb = torch.cat((l_in_emb, y_in_emb), dim=1) # (batch_size, x_seq_len+1, D_emb)
             y_seq_len += 1
 
+        y_in_emb_andMore = y_in_emb
+
+        if src_lang_oneHot is not None:
+            tmp = src_lang_oneHot[:,None,:].repeat(1,y_seq_len,1)
+            y_in_emb_andMore = torch.cat((tmp, y_in_emb_andMore), dim=2)
+
         if tgt_lang_oneHot is not None:
             tmp = tgt_lang_oneHot[:,None,:].repeat(1,y_seq_len,1)
-            y_in_emb_andMore = torch.cat((tmp, y_in_emb), dim=2)
+            y_in_emb_andMore = torch.cat((tmp, y_in_emb_andMore), dim=2)
 
         h_in_big = h_in.view(-1, self.d_ctx) \
                 # (batch_size * x_seq_len, d_ctx) 
@@ -491,10 +507,10 @@ class Decoder(nn.Module):
             
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
-            if tgt_lang_oneHot is not None:
-                out, s_t = self.rnn( torch.cat((y_in_emb_andMore[:,idx,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
-            else:
-                out, s_t = self.rnn( torch.cat((y_in_emb[:,idx,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
+            #if src_lang_oneHot is not None or tgt_lang_oneHot is not None:
+            out, s_t = self.rnn( torch.cat((y_in_emb_andMore[:,idx,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
+            #else:
+            #    out, s_t = self.rnn( torch.cat((y_in_emb[:,idx,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
 
             fin_y = self.y_to_fin( y_in_emb[:,idx,:] ) # (batch_size, d_word_vec)
             fin_c = self.c_to_fin( c_t ) # (batch_size, d_word_vec)
@@ -517,7 +533,7 @@ class Decoder(nn.Module):
         
         return ans.view(batch_size * y_seq_len, -1)
 
-    def greedy_search(self, h_in, h_in_len, l_in=None, tgt_lang_oneHot=None):
+    def greedy_search(self, h_in, h_in_len, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
         # h_in_len : (batch_size)
         h_in_len = h_in_len.data.view(-1).tolist()
@@ -539,8 +555,13 @@ class Decoder(nn.Module):
             ft = self.tt.LongTensor(start)[:,None] # (batch_size, 1)
             y_in_emb = self.emb( Variable( ft ) ) # (batch_size, 1, d_word_vec)
 
+        y_in_emb_andMore = y_in_emb
+
+        if src_lang_oneHot is not None:
+            y_in_emb_andMore = torch.cat((src_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
+
         if tgt_lang_oneHot is not None:
-            y_in_emb_andMore = torch.cat((tgt_lang_oneHot[:,None,:], y_in_emb), dim=2)
+            y_in_emb_andMore = torch.cat((tgt_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
 
         h_in_big = h_in.contiguous().view(batch_size * x_seq_len, self.d_ctx ) \
                 # (batch_size * x_seq_len, D_hid_enc * num_dir_enc) 
@@ -571,10 +592,10 @@ class Decoder(nn.Module):
             c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
-            if tgt_lang_oneHot is not None:
-                out, s_t = self.rnn( torch.cat((y_in_emb_andMore[:,0,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
-            else:
-                out, s_t = self.rnn( torch.cat((y_in_emb[:,0,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
+            #if tgt_lang_oneHot is not None:
+            out, s_t = self.rnn( torch.cat((y_in_emb_andMore[:,0,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
+            #else:
+            #    out, s_t = self.rnn( torch.cat((y_in_emb[:,0,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
             ####################################################
             #s_t = self.rnn(torch.cat((c_t, y_in_emb[:,0,:]), dim=1), s_tm1[0] )
             #s_t = self.drop(s_t)
@@ -613,8 +634,13 @@ class Decoder(nn.Module):
             y_in_emb = self.emb( Variable( topi ) )
             s_tm1 = s_t
 
+            y_in_emb_andMore = y_in_emb
+
+            if src_lang_oneHot is not None:
+                y_in_emb_andMore = torch.cat((src_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
+
             if tgt_lang_oneHot is not None:
-                y_in_emb_andMore = torch.cat((tgt_lang_oneHot[:,None,:], y_in_emb), dim=2)
+                y_in_emb_andMore = torch.cat((tgt_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
 
         return gen_idx
 
@@ -627,7 +653,8 @@ class NMTmodelRNN(nn.Module):
             self, n_src_vocab, n_tgt_vocab, n_max_seq, n_layers=2,
             d_word_vec=512, d_model=512, dropout=0.1,
             no_proj_share_weight=True, embs_share_weight=True,
-            enc_lang=False, dec_lang=False, enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_tgtLang_oh=False,
+            enc_lang=False, dec_lang=False,
+            enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_srcLang_oh=False, dec_tgtLang_oh=False,
             srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={},
             uni_steps=0, uni_coeff=0., uni_norm=False, use_pos_emb=False,
             uni_crit='cossim', uni_margin=1, uni_switch=.0, uni_mem_eff=False,
@@ -647,7 +674,9 @@ class NMTmodelRNN(nn.Module):
             n_tgt_vocab, n_max_seq, n_layers=n_layers,
             d_word_vec=d_word_vec, d_model=d_model,
             dropout=dropout, no_proj_share_weight = no_proj_share_weight,
-            cuda=cuda, nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*dec_tgtLang_oh)
+            cuda=cuda,
+            nb_lang_src=len(srcLangIdx2oneHotIdx)*dec_srcLang_oh,
+            nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*dec_tgtLang_oh)
 
         
         # self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
@@ -657,10 +686,13 @@ class NMTmodelRNN(nn.Module):
         #                         nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*enc_tgtLang_oh,
         #                         cuda=cuda)
 
-        assert not (enc_srcLang_oh or enc_tgtLang_oh), "Not implemented"
+        #assert not (enc_srcLang_oh or enc_tgtLang_oh), "Not implemented"
         self.encoder = EncoderFast(n_src_vocab, n_max_seq,
                                     d_word_vec=d_word_vec, d_model=d_model,
-                                    dropout=dropout, cuda=cuda)
+                                    dropout=dropout,
+                                    nb_lang_src=len(srcLangIdx2oneHotIdx)*enc_srcLang_oh,
+                                    nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*enc_tgtLang_oh,
+                                    cuda=cuda)
 
         if uni_steps:
             UniversalEnc = MemEffUniversalEncoder if self.uni_mem_eff else UniversalEncoder
@@ -677,6 +709,7 @@ class NMTmodelRNN(nn.Module):
         self.dec_lang = dec_lang
         self.enc_srcLang_oh = enc_srcLang_oh
         self.enc_tgtLang_oh = enc_tgtLang_oh
+        self.dec_srcLang_oh = dec_srcLang_oh
         self.dec_tgtLang_oh = dec_tgtLang_oh
 
         
@@ -716,7 +749,8 @@ class NMTmodelRNN(nn.Module):
         tgt_lang_oneHot_forEnc = self.lang2oneHot(tgt_lang_seq, self.tgtLangIdx2oneHotIdx) if self.enc_tgtLang_oh else None
 
        
-        enc_output = self.encoder(src_seq, lengths_seq_src, tgt_lang_seq_forEnc, src_lang_oneHot_forEnc, tgt_lang_oneHot_forEnc)
+        enc_output = self.encoder(src_seq, lengths_seq_src, l_in=tgt_lang_seq_forEnc,
+            src_lang_oneHot=src_lang_oneHot_forEnc, tgt_lang_oneHot=tgt_lang_oneHot_forEnc)
         if self.uni_steps:
             enc_output = self.uni_enc(enc_output, lengths_seq_src)
             lengths_seq_src[:] = self.uni_steps
@@ -737,10 +771,12 @@ class NMTmodelRNN(nn.Module):
 
 
         tgt_lang_seq_forDec = tgt_lang_seq if self.dec_lang else None
+        src_lang_oneHot_forDec = self.lang2oneHot(src_lang_seq, self.srcLangIdx2oneHotIdx) if self.dec_srcLang_oh else None
         tgt_lang_oneHot_forDec = self.lang2oneHot(tgt_lang_seq, self.tgtLangIdx2oneHotIdx) if self.dec_tgtLang_oh else None
 
         
-        dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq, tgt_lang_seq_forDec, tgt_lang_oneHot_forDec)
+        dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq, l_in=tgt_lang_seq_forDec,
+            src_lang_oneHot=src_lang_oneHot_forDec, tgt_lang_oneHot=tgt_lang_oneHot_forDec)
         #################################################
         if self.uni_coeff and self.uni_steps:
             #_, sent_sort_idx = lengths_seq_tgt_ori.sort(descending=True)
