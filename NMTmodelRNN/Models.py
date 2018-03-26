@@ -758,11 +758,10 @@ class NMTmodelRNN(nn.Module):
                 enc_output_tgt = self.encoder(tgt_seq_ori[sent_sort_idx], lengths_seq_tgt_ori[sent_sort_idx])
                 enc_output_tgt = self.uni_enc(enc_output_tgt, lengths_seq_tgt_ori[sent_sort_idx])
 
-                
-                mask = torch.rand(enc_output.size()[:2])
+                mask = torch.rand(enc_output.size())
                 mask = mask >= self.uni_switch
                 mask = mask.type(self.tt.FloatTensor)
-                mask = mask[:,:,None]
+                #mask = mask[:,:,None]
                 
                 enc_output.data = (mask * enc_output.data) + ((1 - mask) * enc_output_tgt.data)
                 #import ipdb; ipdb.set_trace()
