@@ -348,7 +348,6 @@ def load_model(opt):
         uni_crit=opt.uni_crit,
         uni_margin=opt.uni_margin,
         uni_switch=opt.uni_switch,
-        uni_mem_eff=opt.uni_mem_eff,
         cuda=opt.cuda)
 
     opt.lr = model_opt.lr
@@ -463,7 +462,6 @@ def main():
     parser.add_argument('-uni_margin', default=1, type=int)
     parser.add_argument('-use_pos_emb', action='store_true')
     parser.add_argument('-uni_switch', type=float, default=0.)
-    parser.add_argument('-uni_mem_eff', action='store_true')
 
     opt = parser.parse_args()
 
@@ -573,7 +571,6 @@ def main():
             uni_crit=opt.uni_crit,
             uni_margin=opt.uni_margin,
             uni_switch=opt.uni_switch,
-            uni_mem_eff=opt.uni_mem_eff,
             cuda=opt.cuda)
 
         #print(modelRNN)
