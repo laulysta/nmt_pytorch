@@ -159,9 +159,9 @@ class UniversalEncoder(nn.Module):
             c_t = F.normalize(c_t, p=2, dim=2)
         return c_t
 
-class MemEffUniversalEncoder(nn.Module):
+class ForLoopUniversalEncoder(nn.Module):
     def __init__(self, d_ctx, uni_steps, uni_norm=False, use_pos_emb=False, cuda=False):
-        super(MemEffUniversalEncoder, self).__init__()
+        super(ForLoopUniversalEncoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         self.keys = nn.Parameter( self.tt.FloatTensor(uni_steps, d_ctx))
         self.keys.data = torch.from_numpy(norm_weight(d_ctx, uni_steps, ortho=False).T) # init the weights
@@ -657,7 +657,7 @@ class NMTmodelRNN(nn.Module):
             enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_srcLang_oh=False, dec_tgtLang_oh=False,
             srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={},
             uni_steps=0, uni_coeff=0., uni_norm=False, use_pos_emb=False,
-            uni_crit='cossim', uni_margin=1, uni_switch=.0, uni_mem_eff=False,
+            uni_crit='cossim', uni_margin=1, uni_switch=.0,
             cuda=False):
 
 
@@ -666,7 +666,6 @@ class NMTmodelRNN(nn.Module):
         self.uni_coeff = uni_coeff
         self.uni_crit = uni_crit
         self.uni_margin = uni_margin
-        self.uni_mem_eff = uni_mem_eff
 
         super(NMTmodelRNN, self).__init__()
 
@@ -695,8 +694,7 @@ class NMTmodelRNN(nn.Module):
                                     cuda=cuda)
 
         if uni_steps:
-            UniversalEnc = MemEffUniversalEncoder if self.uni_mem_eff else UniversalEncoder
-            self.uni_enc = UniversalEnc(d_model*2, uni_steps=uni_steps, uni_norm=uni_norm, use_pos_emb=use_pos_emb, cuda=cuda)
+            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, uni_norm=uni_norm, use_pos_emb=use_pos_emb, cuda=cuda)
         self.uni_switch = uni_switch
 
         if embs_share_weight:

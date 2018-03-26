@@ -47,8 +47,6 @@ def load_model(opt):
         model_opt.uni_norm = False
     if 'use_pos_emb' not in checkpoint['settings']:
         model_opt.use_pos_emb = False
-    if 'uni_mem_eff' not in checkpoint['settings']:
-        model_opt.uni_mem_eff = False
 
     modelRNN = NMTmodelRNN(
         model_opt.src_vocab_size,
@@ -71,7 +69,6 @@ def load_model(opt):
         uni_coeff=model_opt.uni_coeff,
         uni_norm=model_opt.uni_norm,
         use_pos_emb=opt.use_pos_emb,
-        uni_mem_eff=opt.uni_mem_eff,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
