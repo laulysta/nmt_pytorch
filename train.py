@@ -78,7 +78,7 @@ class MainModel(nn.Module):
         return loss, pred
 
 
-def train_epoch(model, training_data, crit, optimizer, opt, epoch_i, best_BLEU, patience_count, nb_examples_seen, pct_next_save):
+def train_epoch(model, training_data, crit, optimizer, opt, epoch_i, best_BLEU, patience_count, nb_examples_seen, pct_next_save, params):
     ''' Epoch operation in training phase'''
 
     start = time.time()
@@ -136,7 +136,7 @@ def train_epoch(model, training_data, crit, optimizer, opt, epoch_i, best_BLEU, 
             set_grad(params, list(model.parameters()))
             if opt.fp16_scale != 1:
                 for param in params:
-                    param.grad.data = params.grad.data / opt.fp16_scale
+                    param.grad.data = param.grad.data / opt.fp16_scale
             nn.utils.clip_grad_norm(params, 1.0)
         else:
             # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs/LSTMs.
@@ -227,7 +227,7 @@ def eval_epoch(model, validation_data, crit, opt):
 
     return total_loss/n_total_words, n_total_correct/n_total_words
 
-def train(model, training_data, validation_data, crit, optimizer, opt, epoch_i, best_BLEU, patience_count):
+def train(model, training_data, validation_data, crit, optimizer, opt, epoch_i, best_BLEU, patience_count, params):
     ''' Start training '''
 
     nb_examples_seen = 0
@@ -238,7 +238,7 @@ def train(model, training_data, validation_data, crit, optimizer, opt, epoch_i, 
         print('[ Starting epoch', epoch_i+1, ']')
 
         train_loss, train_accu, epoch_i, best_BLEU, patience_count, optimizer, nb_examples_seen, pct_next_save = train_epoch(model, training_data, crit, optimizer, opt,
-                                                                                                            epoch_i, best_BLEU, patience_count, nb_examples_seen, pct_next_save)
+                                                                                                                             epoch_i, best_BLEU, patience_count, nb_examples_seen, pct_next_save, params)
         start = time.time()
         valid_loss, valid_accu = eval_epoch(model, validation_data, crit, opt)
         print('  - (Validation) ppl: {ppl: 8.5f}, accuracy: {accu:3.3f} %, '\
@@ -424,6 +424,14 @@ def nb_lang(lang_data):
     
     return len(lang_token_idx)
 
+def set_grad(params, params_with_grad):
+    for param, param_w_grad in zip(params, params_with_grad):
+        if param.grad is None:
+            param.grad = torch.nn.Parameter(
+                param.data.new().resize_(*param.data.size()))
+        grad = param_w_grad.grad.data
+        param.grad.data.copy_(grad)
+
 def main():
     ''' Main function '''
     parser = argparse.ArgumentParser()
@@ -534,7 +542,6 @@ def main():
         src_lang_insts=(data['train']['src_lang'] if opt.source_lang else None),
         tgt_lang_insts=(data['train']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.batch_size,
-        fp16= bool(opt.fp16_scale),
         cuda=opt.cuda,
         is_train=True,
         sort_by_length=True)
@@ -548,7 +555,6 @@ def main():
         tgt_lang_insts=(data['valid']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.valid_batch_size,
         shuffle=False,
-        fp16= bool(opt.fp16_scale),
         cuda=opt.cuda,
         is_train=False,
         sort_by_length=True)
@@ -664,7 +670,7 @@ def main():
     if opt.multi_gpu:
         model = nn.DataParallel(model)
 
-    train(model, training_data, validation_data, crit, optimizer, opt, epoch_i, best_BLEU, patience_count)
+    train(model, training_data, validation_data, crit, optimizer, opt, epoch_i, best_BLEU, patience_count, params)
 
 if __name__ == '__main__':
     main()

@@ -11,7 +11,7 @@ class DataLoader(object):
     def __init__(
             self, src_word2idx, tgt_word2idx,
             src_insts=None, tgt_insts=None, src_lang_insts=None, tgt_lang_insts=None,
-            fp16=False, cuda=True, batch_size=64, shuffle=True,
+            cuda=True, batch_size=64, shuffle=True,
             is_train=True, sort_by_length=False,
             maxibatch_size=20):
 
@@ -22,7 +22,6 @@ class DataLoader(object):
             assert len(src_insts) == len(tgt_insts)
 
         self.nb_examples = len(src_insts)
-        self.fp16 = fp16
         self.cuda = cuda
         self._n_batch = int(np.ceil(len(src_insts) / batch_size))
 
@@ -166,9 +165,7 @@ class DataLoader(object):
             if self.cuda:
                 inst_data_tensor = inst_data_tensor.cuda()
                 inst_position_tensor = inst_position_tensor.cuda()
-                if self.fp16:
-                    inst_data_tensor = inst_data_tensor.half()
-                    inst_position_tensor = inst_position_tensor.half()
+                
             return inst_data_tensor, inst_position_tensor
 
         if self._iter_count < self._n_batch:

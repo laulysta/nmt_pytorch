@@ -247,7 +247,7 @@ class EncoderFast(nn.Module):
         self.drop = nn.Dropout(p=dropout)
         self.n_layers = n_layers
         self.d_model = d_model
-        self.cuda = cuda
+        self.cuda_ = cuda
         self.fp16 = fp16
         self.tt = torch.cuda if cuda else torch
 
@@ -258,7 +258,7 @@ class EncoderFast(nn.Module):
 
         h_0 = Variable( self.tt.FloatTensor(self.n_layers * 2, \
                                             batch_size, self.d_model).zero_() )
-        if self.cuda and self.fp16:
+        if self.cuda_ and self.fp16:
             h_0 = h_0.half()
 
         x_in_emb = self.emb(x_in) # (batch_size, x_seq_len, D_emb)
@@ -455,7 +455,7 @@ class Decoder(nn.Module):
         self.n_tgt_vocab = n_tgt_vocab
         self.d_word_vec = d_word_vec
         self.n_max_seq = n_max_seq
-        self.cuda = cuda
+        self.cuda_ = cuda
         self.fp16 = fp16
 
     def forward(self, h_in, h_in_len, y_in, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None):
@@ -468,10 +468,9 @@ class Decoder(nn.Module):
         xmask = xlen_to_mask_rnn(h_in_len.tolist(), self.tt) # (batch_size, x_seq_len)
 
         s_0_ = torch.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
-        s_0_ = torch.div( s_0_, Variable(self.tt.FloatTensor(h_in_len.tolist()).view(-1,1)) )
-        if self.cuda and self.fp16:
-            s_0_ = s_0_.half()
-
+        tmp = Variable( self.tt.FloatTensor(h_in_len.tolist()).view(-1,1) )
+        tmp = tmp.half() if self.cuda_ and self.fp16 else tmp
+        s_0_ = torch.div( s_0_, tmp )
         s_0 = self.ctx_to_s0(s_0_)
         s_0 = F.tanh(s_0)
         s_tm1 = s_0 # (batch_size, n_layers * d_model)
@@ -558,7 +557,7 @@ class Decoder(nn.Module):
 
         s_tm1 = torch.sum(h_in, 1) # (batch_size, d_ctx)
         s_tm1 = torch.div( s_tm1, Variable(self.tt.FloatTensor(h_in_len).view(batch_size, 1)) )
-        if self.cuda and self.fp16:
+        if self.cuda_ and self.fp16:
             s_tm1 = s_tm1.half()
         s_tm1 = self.ctx_to_s0(s_tm1)
         s_tm1 = F.tanh(s_tm1)
@@ -678,7 +677,7 @@ class NMTmodelRNN(nn.Module):
             fp16=False, cuda=False):
 
         self.fp16 = fp16
-        self.cuda = cuda
+        self.cuda_ = cuda
 
         self.n_layers = n_layers
         self.uni_steps = uni_steps
@@ -736,7 +735,7 @@ class NMTmodelRNN(nn.Module):
 
     def lang2oneHot(self, lang_seq, langIdx2oneHotIdx):
         oh = self.tt.FloatTensor(lang_seq.size()[0], len(langIdx2oneHotIdx)).zero_()
-        
+        oh = oh.half() if self.fp16 else oh
         lang_seq = lang_seq.data.tolist()
         for ii, ll in enumerate(lang_seq):
             idx = langIdx2oneHotIdx[ll[0]]
@@ -808,7 +807,7 @@ class NMTmodelRNN(nn.Module):
                 sim_loss = -( (enc_output*enc_output_tgt).sum(dim=2)/(norm1*norm2) ).sum()
             elif self.uni_crit == 'cossim_margin':
                 perm = torch.randperm(len(enc_output))
-                if self.cuda:
+                if self.cuda_:
                     perm = perm.cuda()
                     if self.fp16:
                         perm = perm.half()
