@@ -33,15 +33,15 @@ def get_attn_padding_mask(seq_q, seq_k):
     pad_attn_mask = pad_attn_mask.expand(mb_size, len_q, len_k) # bxsqxsk
     return pad_attn_mask
 
-def get_attn_subsequent_mask(seq):
-    ''' Get an attention mask to avoid using the subsequent info.'''
-    assert seq.dim() == 2
-    attn_shape = (seq.size(0), seq.size(1), seq.size(1))
-    subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
-    subsequent_mask = torch.from_numpy(subsequent_mask)
-    if seq.is_cuda:
-        subsequent_mask = subsequent_mask.cuda()
-    return subsequent_mask
+# def get_attn_subsequent_mask(seq):
+#     ''' Get an attention mask to avoid using the subsequent info.'''
+#     assert seq.dim() == 2
+#     attn_shape = (seq.size(0), seq.size(1), seq.size(1))
+#     subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
+#     subsequent_mask = torch.from_numpy(subsequent_mask)
+#     if seq.is_cuda:
+#         subsequent_mask = subsequent_mask.cuda()
+#     return subsequent_mask
 
 def flip(x, dim):
     xsize = x.size()
@@ -105,14 +105,19 @@ def position_encoding_init(n_position, d_pos_vec, tt):
     return torch.from_numpy(position_enc).type(tt.FloatTensor)
 
 class UniversalEncoder(nn.Module):
-    def __init__(self, d_ctx, uni_steps, uni_norm=False, use_pos_emb=False, cuda=False):
+    def __init__(self, d_ctx, uni_steps, uni_norm=False, use_pos_emb=False, fp16=False, cuda=False):
         super(UniversalEncoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
-        self.keys = nn.Parameter( self.tt.FloatTensor(uni_steps, d_ctx))
+        
+        self.keys = nn.Parameter(self.tt.FloatTensor(uni_steps, d_ctx))
         self.keys.data = torch.from_numpy(norm_weight(d_ctx, uni_steps, ortho=False).T) # init the weights
+        if cuda and fp16:
+            self.keys = self.keys.half()
 
         self.position_emb = Variable(self.tt.FloatTensor(uni_steps, d_ctx))
         self.position_emb.data = position_encoding_init(uni_steps, d_ctx, self.tt)
+        if cuda and fp16:
+            self.position_emb = self.position_emb.half()
         
         self.d_ctx = d_ctx
         self.uni_steps = uni_steps
@@ -222,7 +227,7 @@ class ForLoopUniversalEncoder(nn.Module):
 class EncoderFast(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
                 d_word_vec=512, d_model=512, dropout=0.5,
-                nb_lang_src=0, nb_lang_tgt=0, cuda=False):
+                nb_lang_src=0, nb_lang_tgt=0, fp16=False, cuda=False):
         super(EncoderFast, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -242,6 +247,8 @@ class EncoderFast(nn.Module):
         self.drop = nn.Dropout(p=dropout)
         self.n_layers = n_layers
         self.d_model = d_model
+        self.cuda = cuda
+        self.fp16 = fp16
         self.tt = torch.cuda if cuda else torch
 
     def forward(self, x_in, x_in_lens, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None):
@@ -251,6 +258,9 @@ class EncoderFast(nn.Module):
 
         h_0 = Variable( self.tt.FloatTensor(self.n_layers * 2, \
                                             batch_size, self.d_model).zero_() )
+        if self.cuda and self.fp16:
+            h_0 = h_0.half()
+
         x_in_emb = self.emb(x_in) # (batch_size, x_seq_len, D_emb)
         x_in_emb = self.drop(x_in_emb)
 
@@ -393,7 +403,7 @@ class Decoder(nn.Module):
     def __init__(
              self, n_tgt_vocab, n_max_seq, n_layers=2,
              d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True,
-             nb_lang_src=0, nb_lang_tgt=0, cuda=False):
+             nb_lang_src=0, nb_lang_tgt=0, fp16=False, cuda=False):
         super(Decoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -445,6 +455,8 @@ class Decoder(nn.Module):
         self.n_tgt_vocab = n_tgt_vocab
         self.d_word_vec = d_word_vec
         self.n_max_seq = n_max_seq
+        self.cuda = cuda
+        self.fp16 = fp16
 
     def forward(self, h_in, h_in_len, y_in, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
@@ -457,6 +469,9 @@ class Decoder(nn.Module):
 
         s_0_ = torch.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
         s_0_ = torch.div( s_0_, Variable(self.tt.FloatTensor(h_in_len.tolist()).view(-1,1)) )
+        if self.cuda and self.fp16:
+            s_0_ = s_0_.half()
+
         s_0 = self.ctx_to_s0(s_0_)
         s_0 = F.tanh(s_0)
         s_tm1 = s_0 # (batch_size, n_layers * d_model)
@@ -543,6 +558,8 @@ class Decoder(nn.Module):
 
         s_tm1 = torch.sum(h_in, 1) # (batch_size, d_ctx)
         s_tm1 = torch.div( s_tm1, Variable(self.tt.FloatTensor(h_in_len).view(batch_size, 1)) )
+        if self.cuda and self.fp16:
+            s_tm1 = s_tm1.half()
         s_tm1 = self.ctx_to_s0(s_tm1)
         s_tm1 = F.tanh(s_tm1)
         s_tm1 = s_tm1.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
@@ -658,8 +675,10 @@ class NMTmodelRNN(nn.Module):
             srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={},
             uni_steps=0, uni_coeff=0., uni_norm=False, use_pos_emb=False,
             uni_crit='cossim', uni_margin=1, uni_switch=.0,
-            cuda=False):
+            fp16=False, cuda=False):
 
+        self.fp16 = fp16
+        self.cuda = cuda
 
         self.n_layers = n_layers
         self.uni_steps = uni_steps
@@ -673,7 +692,7 @@ class NMTmodelRNN(nn.Module):
             n_tgt_vocab, n_max_seq, n_layers=n_layers,
             d_word_vec=d_word_vec, d_model=d_model,
             dropout=dropout, no_proj_share_weight = no_proj_share_weight,
-            cuda=cuda,
+            fp16=fp16, cuda=cuda,
             nb_lang_src=len(srcLangIdx2oneHotIdx)*dec_srcLang_oh,
             nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*dec_tgtLang_oh)
 
@@ -691,10 +710,10 @@ class NMTmodelRNN(nn.Module):
                                     dropout=dropout,
                                     nb_lang_src=len(srcLangIdx2oneHotIdx)*enc_srcLang_oh,
                                     nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*enc_tgtLang_oh,
-                                    cuda=cuda)
+                                    fp16=fp16, cuda=cuda)
 
         if uni_steps:
-            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, uni_norm=uni_norm, use_pos_emb=use_pos_emb, cuda=cuda)
+            self.uni_enc = UniversalEncoder(d_model*2, uni_steps=uni_steps, uni_norm=uni_norm, use_pos_emb=use_pos_emb, fp16=fp16, cuda=cuda)
         self.uni_switch = uni_switch
 
         if embs_share_weight:
@@ -789,8 +808,10 @@ class NMTmodelRNN(nn.Module):
                 sim_loss = -( (enc_output*enc_output_tgt).sum(dim=2)/(norm1*norm2) ).sum()
             elif self.uni_crit == 'cossim_margin':
                 perm = torch.randperm(len(enc_output))
-                if enc_output_tgt.is_cuda:
+                if self.cuda:
                     perm = perm.cuda()
+                    if self.fp16:
+                        perm = perm.half()
                 enc_output_tgt_perm = enc_output_tgt[perm]
                 norm2_perm = norm2[perm]
 

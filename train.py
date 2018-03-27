@@ -39,6 +39,7 @@ def get_loss(crit, pred, gold, opt, smoothing_eps=0.1):
     if opt.smoothing and smoothing_eps:
         if opt.cuda:
             smooth = gold.ne(Constants.PAD).type(torch.cuda.FloatTensor) * torch.mean(pred, -1)
+            assert not opt.fp16_scale
         else:
             smooth = gold.ne(Constants.PAD).type(torch.FloatTensor)*torch.mean(pred, -1)
         smooth = -smooth.sum()
@@ -123,17 +124,33 @@ def train_epoch(model, training_data, crit, optimizer, opt, epoch_i, best_BLEU, 
         else:
             ce_loss = loss
 
+        if opt.cuda and opt.fp16_scale and opt.fp16_scale != 1:
+            loss = loss * opt.fp16_scale
+
         if opt.multi_gpu:
             loss.backward(torch.ones_like(loss.data))
         else:
             loss.backward()
 
-        # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs/LSTMs.
-        nn.utils.clip_grad_norm(model.parameters(), 1.0)
+        if opt.cuda and opt.fp16_scale:
+            set_grad(params, list(model.parameters()))
+            if opt.fp16_scale != 1:
+                for param in params:
+                    param.grad.data = params.grad.data / opt.fp16_scale
+            nn.utils.clip_grad_norm(params, 1.0)
+        else:
+            # `clip_grad_norm` helps prevent the exploding gradient problem in RNNs/LSTMs.
+            nn.utils.clip_grad_norm(model.parameters(), 1.0)
 
         # update parameters
         #print('G: ', sum(param.sum() for param in model.model.parameters()))
         optimizer.step()
+
+        if opt.cuda and opt.fp16_scale:
+            params__ = list(model.parameters())
+            for ii in range(len(params__)):
+                params__[ii].data.copy_(params[ii].data)
+
         if opt.sch_optim:
             optimizer.update_learning_rate()
 
@@ -349,17 +366,32 @@ def load_model(opt):
         uni_crit=opt.uni_crit,
         uni_margin=opt.uni_margin,
         uni_switch=opt.uni_switch,
+        fp16= bool(opt.fp16_scale),
         cuda=opt.cuda)
 
     opt.lr = model_opt.lr
     modelRNN.load_state_dict(checkpoint['model'])
 
+
+    if opt.cuda:
+        modelRNN = modelRNN.cuda()
+        if opt.fp16_scale:
+            modelRNN = modelRNN.half()
+
+    if opt.cuda and opt.fp16_scale:
+        param_copy = [param.clone().type(torch.cuda.FloatTensor).detach() for param in modelRNN.parameters()]
+        for param in param_copy:
+            param.requires_grad = True
+        params = param_copy
+    else:
+        params = modelRNN.parameters()
+
+
+
     if opt.optim == 'adadelta':
-        optimizer = optim.Adadelta(modelRNN.parameters(),
-                                    lr=1.0, rho=0.95, eps=1e-06, weight_decay=0)
+        optimizer = optim.Adadelta(params, lr=1.0, rho=0.95, eps=1e-06, weight_decay=0)
     elif opt.optim == 'adam':
-        optimizer = optim.Adam(modelRNN.parameters(),
-                                lr=opt.lr, betas=(0.9, 0.98), eps=1e-09)
+        optimizer = optim.Adam(params, lr=opt.lr, betas=(0.9, 0.98), eps=1e-09)
     else:
         sys.exit('Wrong optimizer')
 
@@ -419,6 +451,8 @@ def main():
     parser.add_argument('-save_freq_pct', type=float, default=1.0)
 
     parser.add_argument('-no_cuda', action='store_true')
+
+    parser.add_argument('-fp16_scale', type=float, default=0.0)
 
     parser.add_argument('-multi_gpu', action='store_true')
 
@@ -500,6 +534,7 @@ def main():
         src_lang_insts=(data['train']['src_lang'] if opt.source_lang else None),
         tgt_lang_insts=(data['train']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.batch_size,
+        fp16= bool(opt.fp16_scale),
         cuda=opt.cuda,
         is_train=True,
         sort_by_length=True)
@@ -513,6 +548,7 @@ def main():
         tgt_lang_insts=(data['valid']['tgt_lang'] if opt.target_lang else None),
         batch_size=opt.valid_batch_size,
         shuffle=False,
+        fp16= bool(opt.fp16_scale),
         cuda=opt.cuda,
         is_train=False,
         sort_by_length=True)
@@ -574,23 +610,36 @@ def main():
             uni_crit=opt.uni_crit,
             uni_margin=opt.uni_margin,
             uni_switch=opt.uni_switch,
+            fp16= bool(opt.fp16_scale),
             cuda=opt.cuda)
 
         #print(modelRNN)
+        if opt.cuda:
+            modelRNN = modelRNN.cuda()
+            if opt.fp16_scale:
+                modelRNN = modelRNN.half()
+
+        if opt.cuda and opt.fp16_scale:
+            param_copy = [param.clone().type(torch.cuda.FloatTensor).detach() for param in modelRNN.parameters()]
+            for param in param_copy:
+                param.requires_grad = True
+            params = param_copy
+        else:
+            params = modelRNN.parameters()
+
 
         if opt.optim == 'adadelta':
-            optimizer = optim.Adadelta(modelRNN.parameters(),
-                                        lr=1.0, rho=0.95, eps=1e-06, weight_decay=0)
+            optimizer = optim.Adadelta(params, lr=1.0, rho=0.95, eps=1e-06, weight_decay=0)
         elif opt.optim == 'adam':
             #optimizer = optim.Adam(modelRNN.get_trainable_parameters(),
             #                        lr=opt.lr, betas=(0.9, 0.98), eps=1e-09)
-            optimizer = optim.Adam(modelRNN.parameters(),
-                                    lr=opt.lr, betas=(0.9, 0.98), eps=1e-09)
+            optimizer = optim.Adam(params, lr=opt.lr, betas=(0.9, 0.98), eps=1e-09)
         else:
             sys.exit('Wrong optimizer')
 
         if opt.sch_optim:
             optimizer = ScheduledOptim(optimizer, opt.d_model, opt.n_warmup_steps)
+
 
 
     def get_criterion(vocab_size):
@@ -605,8 +654,11 @@ def main():
     crit = get_criterion(training_data.tgt_vocab_size)
     
     if opt.cuda:
-        modelRNN = modelRNN.cuda()
+        #modelRNN = modelRNN.cuda()
         crit = crit.cuda()
+        if opt.fp16_scale:
+            #modelRNN = modelRNN.half()
+            crit = crit.half()
 
     model = MainModel(modelRNN, crit, opt)
     if opt.multi_gpu:
