@@ -95,7 +95,7 @@ def layer_init_weights(layer, d_out, d_in, scale=None, bias=True):
 class EncoderFast(nn.Module):
     def __init__(self, n_src_vocab, n_max_seq, n_layers=1,
                 d_word_vec=512, d_model=512, dropout=0.5,
-                nb_lang_src=0, nb_lang_tgt=0, cuda=False):
+                nb_lang_src=0, nb_lang_tgt=0, share_enc_dec=False, cuda=False):
         super(EncoderFast, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -103,6 +103,9 @@ class EncoderFast(nn.Module):
         self.emb = nn.Embedding(n_src_vocab, d_word_vec, padding_idx=Constants.PAD)
         emb_init_weights(self.emb, n_src_vocab, d_word_vec)
 
+        # if share_enc_dec:
+        #     self.rnn = None
+        # else:
         self.rnn = nn.GRU(
                     input_size=d_word_vec+nb_lang_src+nb_lang_tgt,
                     hidden_size=d_model,
@@ -276,13 +279,17 @@ class Decoder(nn.Module):
 
         
         #self.rnn = nn.GRUCell(d_ctx+d_word_vec, d_model)
-        self.rnn = nn.GRU(d_word_vec+d_ctx+nb_lang_src+nb_lang_tgt, d_model, \
+        self.rnn1 = nn.GRU(d_word_vec, d_model, \
                            n_layers, dropout=dropout, batch_first=True)
-        rnn_init_weights(self.rnn, d_model, d_word_vec+d_ctx+nb_lang_src+nb_lang_tgt)
+        rnn_init_weights(self.rnn1, d_model, d_word_vec)
+
+        self.rnn2 = nn.GRU(nb_lang_src+nb_lang_tgt+d_ctx, d_model, \
+                           n_layers, dropout=dropout, batch_first=True)
+        rnn_init_weights(self.rnn2, d_model, nb_lang_src+nb_lang_tgt+d_ctx)
 
         self.drop = nn.Dropout(p=dropout)
-        self.ctx_to_s0 = nn.Linear(d_ctx, n_layers * d_model)
-        layer_init_weights(self.ctx_to_s0, d_ctx, n_layers * d_model)
+        self.ctx_to_s0 = nn.Linear(nb_lang_src+nb_lang_tgt+d_ctx, n_layers * d_model)
+        layer_init_weights(self.ctx_to_s0, nb_lang_src+nb_lang_tgt+d_ctx, n_layers * d_model)
 
         self.y_to_ctx = nn.Linear(d_word_vec, d_ctx)
         layer_init_weights(self.y_to_ctx, d_word_vec, d_ctx)
@@ -330,10 +337,15 @@ class Decoder(nn.Module):
 
         s_0_ = torch.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
         s_0_ = torch.div( s_0_, Variable(self.tt.FloatTensor(h_in_len.tolist()).view(-1,1)) )
-        s_0 = self.ctx_to_s0(s_0_)
+        s_0_andMore = s_0_
+        if src_lang_oneHot is not None:
+            s_0_andMore = torch.cat((src_lang_oneHot, s_0_andMore), dim=1)
+        if tgt_lang_oneHot is not None:
+            s_0_andMore = torch.cat((tgt_lang_oneHot, s_0_andMore), dim=1)
+        s_0 = self.ctx_to_s0(s_0_andMore)
         s_0 = F.tanh(s_0)
-        s_tm1 = s_0 # (batch_size, n_layers * d_model)
-        s_tm1 = s_tm1.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
+        s_t = s_0 # (batch_size, n_layers * d_model)
+        s_t = s_t.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
                 # (n_layers, batch_size, d_model)
 
         y_in_emb = self.emb(y_in) # (batch_size, y_seq_len, d_word_vec)
@@ -344,15 +356,15 @@ class Decoder(nn.Module):
             y_in_emb = torch.cat((l_in_emb, y_in_emb), dim=1) # (batch_size, x_seq_len+1, D_emb)
             y_seq_len += 1
 
-        y_in_emb_andMore = y_in_emb
+        # y_in_emb_andMore = y_in_emb
 
-        if src_lang_oneHot is not None:
-            tmp = src_lang_oneHot[:,None,:].repeat(1,y_seq_len,1)
-            y_in_emb_andMore = torch.cat((tmp, y_in_emb_andMore), dim=2)
+        # if src_lang_oneHot is not None:
+        #     tmp = src_lang_oneHot[:,None,:].repeat(1,y_seq_len,1)
+        #     y_in_emb_andMore = torch.cat((tmp, y_in_emb_andMore), dim=2)
 
-        if tgt_lang_oneHot is not None:
-            tmp = tgt_lang_oneHot[:,None,:].repeat(1,y_seq_len,1)
-            y_in_emb_andMore = torch.cat((tmp, y_in_emb_andMore), dim=2)
+        # if tgt_lang_oneHot is not None:
+        #     tmp = tgt_lang_oneHot[:,None,:].repeat(1,y_seq_len,1)
+        #     y_in_emb_andMore = torch.cat((tmp, y_in_emb_andMore), dim=2)
 
         h_in_big = h_in.view(-1, self.d_ctx) \
                 # (batch_size * x_seq_len, d_ctx) 
@@ -362,8 +374,17 @@ class Decoder(nn.Module):
 
         logits = []
         for idx in range(y_seq_len):
-            ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, -1) \
-                    # (batch_size, d_model * n_layers)
+            #ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, -1) \
+            #        # (batch_size, d_model * n_layers)
+
+            # in (batch_size, 1, D_emb_dec)
+            # s_t (num_layers_dec, batch_size, D_hid_dec)
+            _, s_t_ = self.rnn1( y_in_emb[:,idx,:][:,None,:], s_t )
+            # out (batch_size, 1, D_hid_dec)
+            # s_t (num_layers_dec, batch_size, D_hid_dec)
+            ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size, -1) \
+                    # (batch_size, D_hid_dec * num_layers_dec)
+
 
             ctx_y = self.y_to_ctx( y_in_emb[:,idx,:] )[:,None,:] # (batch_size, 1, d_ctx)
             ctx_s = self.s_to_ctx( ctx_s_t_ )[:,None,:]
@@ -377,13 +398,17 @@ class Decoder(nn.Module):
 
             c_t = torch.mul( h_in, score ) # (batch_size, x_seq_len, d_ctx)
             c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
-            
+            c_t_andMore = c_t
+            if src_lang_oneHot is not None:
+                c_t_andMore = torch.cat((src_lang_oneHot, c_t_andMore), dim=1)
+
+            if tgt_lang_oneHot is not None:
+                c_t_andMore = torch.cat((tgt_lang_oneHot, c_t_andMore), dim=1)
+
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
-            #if src_lang_oneHot is not None or tgt_lang_oneHot is not None:
-            out, s_t = self.rnn( torch.cat((y_in_emb_andMore[:,idx,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
-            #else:
-            #    out, s_t = self.rnn( torch.cat((y_in_emb[:,idx,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
+            # out, s_t = self.rnn( torch.cat((y_in_emb_andMore[:,idx,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
+            out, s_t = self.rnn2( c_t_andMore[:,None,:], s_t_ )
 
             fin_y = self.y_to_fin( y_in_emb[:,idx,:] ) # (batch_size, d_word_vec)
             fin_c = self.c_to_fin( c_t ) # (batch_size, d_word_vec)
@@ -394,7 +419,6 @@ class Decoder(nn.Module):
             logit = self.fin_to_voc( fin ) # (batch_size, vocab_size)
             logits.append( logit )
 
-            s_tm1 = s_t
             # logits : list of (batch_size, vocab_size) vectors
         
         ans = torch.cat(logits, 0) # (y_seq_len * batch_size, vocab_size)
@@ -414,11 +438,16 @@ class Decoder(nn.Module):
         batch_size, x_seq_len = h_in.size()[0], h_in.size()[1]
         xmask = xlen_to_mask_rnn(h_in_len, self.tt) # (batch_size, x_seq_len)
 
-        s_tm1 = torch.sum(h_in, 1) # (batch_size, d_ctx)
-        s_tm1 = torch.div( s_tm1, Variable(self.tt.FloatTensor(h_in_len).view(batch_size, 1)) )
-        s_tm1 = self.ctx_to_s0(s_tm1)
-        s_tm1 = F.tanh(s_tm1)
-        s_tm1 = s_tm1.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
+        s_t = torch.sum(h_in, 1) # (batch_size, d_ctx)
+        s_t = torch.div( s_t, Variable(self.tt.FloatTensor(h_in_len).view(batch_size, 1)) )
+        s_t_andMore = s_t
+        if src_lang_oneHot is not None:
+            s_t_andMore = torch.cat((src_lang_oneHot, s_t_andMore), dim=1)
+        if tgt_lang_oneHot is not None:
+            s_t_andMore = torch.cat((tgt_lang_oneHot, s_t_andMore), dim=1)
+        s_t = self.ctx_to_s0(s_t_andMore)
+        s_t = F.tanh(s_t)
+        s_t = s_t.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
                 # (n_layers, batch_size, d_model)
 
         if l_in is not None:
@@ -428,13 +457,13 @@ class Decoder(nn.Module):
             ft = self.tt.LongTensor(start)[:,None] # (batch_size, 1)
             y_in_emb = self.emb( Variable( ft ) ) # (batch_size, 1, d_word_vec)
 
-        y_in_emb_andMore = y_in_emb
+        # y_in_emb_andMore = y_in_emb
 
-        if src_lang_oneHot is not None:
-            y_in_emb_andMore = torch.cat((src_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
+        # if src_lang_oneHot is not None:
+        #     y_in_emb_andMore = torch.cat((src_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
 
-        if tgt_lang_oneHot is not None:
-            y_in_emb_andMore = torch.cat((tgt_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
+        # if tgt_lang_oneHot is not None:
+        #     y_in_emb_andMore = torch.cat((tgt_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
 
         h_in_big = h_in.contiguous().view(batch_size * x_seq_len, self.d_ctx ) \
                 # (batch_size * x_seq_len, D_hid_enc * num_dir_enc) 
@@ -447,9 +476,13 @@ class Decoder(nn.Module):
             # in (batch_size, 1, d_word_vec)
             # s_t (n_layers, batch_size, d_model)
             #_, s_t_ = self.rnn1( y_in_emb, s_t )
-
-            ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, self.n_layers * self.d_model) \
-                    # (batch_size, n_layers * d_model)
+            # ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, self.n_layers * self.d_model) \
+            #         # (batch_size, n_layers * d_model)
+            _, s_t_ = self.rnn1( y_in_emb, s_t )
+            # out (batch_size, 1, D_hid_dec)
+            # s_t (num_layers_dec, batch_size, D_hid_dec)
+            ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size, self.n_layers * self.d_model) \
+                    # (batch_size, num_layers_dec * D_hid_dec)
 
             ctx_y = self.y_to_ctx( y_in_emb.view(batch_size, self.d_word_vec) )[:,None,:]
             ctx_s = self.s_to_ctx( ctx_s_t_ )[:,None,:]
@@ -463,20 +496,20 @@ class Decoder(nn.Module):
 
             c_t = torch.mul( h_in, score ) # (batch_size, x_seq_len, d_ctx)
             c_t = torch.sum( c_t, 1) # (batch_size, d_ctx)
+
+            c_t_andMore = c_t
+            if src_lang_oneHot is not None:
+                c_t_andMore = torch.cat((src_lang_oneHot, c_t_andMore), dim=1)
+
+            if tgt_lang_oneHot is not None:
+                c_t_andMore = torch.cat((tgt_lang_oneHot, c_t_andMore), dim=1)
+
             # in (batch_size, 1, d_ctx)
             # s_t (n_layers, batch_size, d_model)
-            #if tgt_lang_oneHot is not None:
-            out, s_t = self.rnn( torch.cat((y_in_emb_andMore[:,0,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
-            #else:
-            #    out, s_t = self.rnn( torch.cat((y_in_emb[:,0,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
-            ####################################################
-            #s_t = self.rnn(torch.cat((c_t, y_in_emb[:,0,:]), dim=1), s_tm1[0] )
-            #s_t = self.drop(s_t)
-            #out = s_t[:,None,:]
-            #s_t = s_t[None,:,:]
-            ####################################################
-            # out (batch_size, 1, d_model)
-            # s_t (n_layers, batch_size, d_model)
+            #out, s_t = self.rnn( torch.cat((y_in_emb_andMore[:,0,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
+            out, s_t = self.rnn2( c_t_andMore[:,None,:], s_t_ )
+            # out (batch_size, 1, D_hid_dec)
+            # s_t (num_layers_dec, batch_size, D_hid_dec)
 
             if idx == 0 and l_in is not None:
                 start = [2 for ii in range(batch_size)] # NOTE <BOS> is always 2
@@ -505,15 +538,14 @@ class Decoder(nn.Module):
                 break
 
             y_in_emb = self.emb( Variable( topi ) )
-            s_tm1 = s_t
 
-            y_in_emb_andMore = y_in_emb
+            # y_in_emb_andMore = y_in_emb
 
-            if src_lang_oneHot is not None:
-                y_in_emb_andMore = torch.cat((src_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
+            # if src_lang_oneHot is not None:
+            #     y_in_emb_andMore = torch.cat((src_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
 
-            if tgt_lang_oneHot is not None:
-                y_in_emb_andMore = torch.cat((tgt_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
+            # if tgt_lang_oneHot is not None:
+            #     y_in_emb_andMore = torch.cat((tgt_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
 
         return gen_idx
 
@@ -528,7 +560,8 @@ class NMTmodelRNN(nn.Module):
             no_proj_share_weight=True, embs_share_weight=True,
             enc_lang=False, dec_lang=False,
             enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_srcLang_oh=False, dec_tgtLang_oh=False,
-            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={}, cuda=False):
+            srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={},
+            share_bidir=False, share_enc_dec=False, share_dec_temp=False, cuda=False):
 
 
         self.n_layers = n_layers
@@ -557,7 +590,30 @@ class NMTmodelRNN(nn.Module):
                                     dropout=dropout,
                                     nb_lang_src=len(srcLangIdx2oneHotIdx)*enc_srcLang_oh,
                                     nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*enc_tgtLang_oh,
+                                    share_enc_dec=share_enc_dec,
                                     cuda=cuda)
+
+        if share_enc_dec:
+            assert self.encoder.rnn.weight_ih_l0.size() == self.decoder.rnn1.weight_ih_l0.size(), \
+            "To share the encoder and decoder RNN, the input matrix size shall be the same."
+            self.encoder.rnn.weight_ih_l0 = self.decoder.rnn1.weight_ih_l0
+            self.encoder.rnn.weight_hh_l0 = self.decoder.rnn1.weight_hh_l0
+            self.encoder.rnn.bias_ih_l0 = self.decoder.rnn1.bias_ih_l0
+            self.encoder.rnn.bias_hh_l0 = self.decoder.rnn1.bias_hh_l0
+
+            self.encoder.rnn.weight_ih_l0_reverse = self.decoder.rnn1.weight_ih_l0
+            self.encoder.rnn.weight_hh_l0_reverse = self.decoder.rnn1.weight_hh_l0
+            self.encoder.rnn.bias_ih_l0_reverse = self.decoder.rnn1.bias_ih_l0
+            self.encoder.rnn.bias_hh_l0_reverse = self.decoder.rnn1.bias_hh_l0
+        elif share_bidir:
+            self.encoder.rnn.weight_ih_l0_reverse = self.encoder.rnn.weight_ih_l0
+            self.encoder.rnn.weight_hh_l0_reverse = self.encoder.rnn.weight_hh_l0
+            self.encoder.rnn.bias_ih_l0_reverse = self.encoder.rnn.bias_ih_l0
+            self.encoder.rnn.bias_hh_l0_reverse = self.encoder.rnn.bias_hh_l0
+
+        if share_dec_temp:
+            self.decoder.rnn2.weight_hh_l0 = self.decoder.rnn1.weight_hh_l0
+            self.decoder.rnn2.bias_hh_l0 = self.decoder.rnn1.bias_hh_l0
 
         if embs_share_weight:
             # Share the weight matrix between src/tgt word embeddings
@@ -565,13 +621,13 @@ class NMTmodelRNN(nn.Module):
             assert n_src_vocab == n_tgt_vocab, \
             "To share word embedding table, the vocabulary size of src/tgt shall be the same."
             self.encoder.emb.weight = self.decoder.emb.weight
+
         self.enc_lang = enc_lang
         self.dec_lang = dec_lang
         self.enc_srcLang_oh = enc_srcLang_oh
         self.enc_tgtLang_oh = enc_tgtLang_oh
         self.dec_srcLang_oh = dec_srcLang_oh
         self.dec_tgtLang_oh = dec_tgtLang_oh
-
         
         self.srcLangIdx2oneHotIdx = srcLangIdx2oneHotIdx
         self.tgtLangIdx2oneHotIdx = tgtLangIdx2oneHotIdx
@@ -608,7 +664,6 @@ class NMTmodelRNN(nn.Module):
         src_lang_oneHot_forEnc = self.lang2oneHot(src_lang_seq, self.srcLangIdx2oneHotIdx) if self.enc_srcLang_oh else None
         tgt_lang_oneHot_forEnc = self.lang2oneHot(tgt_lang_seq, self.tgtLangIdx2oneHotIdx) if self.enc_tgtLang_oh else None
 
-       
         enc_output = self.encoder(src_seq, lengths_seq_src, l_in=tgt_lang_seq_forEnc,
             src_lang_oneHot=src_lang_oneHot_forEnc, tgt_lang_oneHot=tgt_lang_oneHot_forEnc)
         
@@ -616,7 +671,6 @@ class NMTmodelRNN(nn.Module):
         tgt_lang_seq_forDec = tgt_lang_seq if self.dec_lang else None
         src_lang_oneHot_forDec = self.lang2oneHot(src_lang_seq, self.srcLangIdx2oneHotIdx) if self.dec_srcLang_oh else None
         tgt_lang_oneHot_forDec = self.lang2oneHot(tgt_lang_seq, self.tgtLangIdx2oneHotIdx) if self.dec_tgtLang_oh else None
-
         
         dec_output = self.decoder(enc_output, lengths_seq_src, tgt_seq, l_in=tgt_lang_seq_forDec,
             src_lang_oneHot=src_lang_oneHot_forDec, tgt_lang_oneHot=tgt_lang_oneHot_forDec)

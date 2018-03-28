@@ -128,7 +128,6 @@ def train_epoch(model, training_data, crit, optimizer, opt, epoch_i, best_BLEU, 
         if opt.sch_optim:
             optimizer.update_learning_rate()
 
-
         # note keeping
         gold = tgt[0][:, 1:]
         n_correct = get_performance(pred, gold)
@@ -325,6 +324,9 @@ def load_model(opt):
         dec_tgtLang_oh=model_opt.dec_tgtLang_oh,
         srcLangIdx2oneHotIdx=model_opt.srcLangIdx2oneHotIdx,
         tgtLangIdx2oneHotIdx=model_opt.tgtLangIdx2oneHotIdx,
+        share_bidir=model_opt.share_bidir,
+        share_enc_dec=model_opt.share_enc_dec,
+        share_dec_temp=model_opt.share_dec_temp,
         cuda=opt.cuda)
 
     opt.lr = model_opt.lr
@@ -430,7 +432,13 @@ def main():
     parser.add_argument('-extra_valid_srcLang', type=str, nargs='+', help='Path extra valid source language')
     parser.add_argument('-extra_valid_tgtLang', type=str, nargs='+', help='Path extra valid target language')
 
+    parser.add_argument('-share_bidir', action='store_true')
+    parser.add_argument('-share_enc_dec', action='store_true')
+    parser.add_argument('-share_dec_temp', action='store_true')
+
     opt = parser.parse_args()
+
+    assert not (opt.share_bidir and opt.share_enc_dec)
 
     assert not (opt.dec_lang and opt.dec_tgtLang_oh)
     assert not (opt.enc_lang and opt.enc_tgtLang_oh)
@@ -532,6 +540,9 @@ def main():
             dec_tgtLang_oh=opt.dec_tgtLang_oh,
             srcLangIdx2oneHotIdx=opt.srcLangIdx2oneHotIdx,
             tgtLangIdx2oneHotIdx=opt.tgtLangIdx2oneHotIdx,
+            share_bidir=opt.share_bidir,
+            share_enc_dec=opt.share_enc_dec,
+            share_dec_temp=opt.share_dec_temp,
             cuda=opt.cuda)
 
         #print(modelRNN)
