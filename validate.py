@@ -56,7 +56,6 @@ def load_model(opt):
         d_word_vec=model_opt.d_word_vec,
         n_layers=model_opt.n_layers,
         dropout=model_opt.dropout,
-        share_enc_dec=model_opt.share_enc_dec,
         enc_lang= model_opt.enc_lang,
         dec_lang=model_opt.dec_lang,
         enc_srcLang_oh=model_opt.enc_srcLang_oh,
