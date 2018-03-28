@@ -39,6 +39,12 @@ def load_model(opt):
         model_opt.srcLangIdx2oneHotIdx = {}
     if 'tgtLangIdx2oneHotIdx' not in checkpoint['settings']:
         model_opt.tgtLangIdx2oneHotIdx = {}
+    if 'share_bidir' not in checkpoint['settings']:
+        model_opt.share_bidir = False
+    if 'share_enc_dec' not in checkpoint['settings']:
+        model_opt.share_enc_dec = False
+    if 'share_dec_temp' not in checkpoint['settings']:
+        model_opt.share_dec_temp = False
 
     modelRNN = NMTmodelRNN(
         model_opt.src_vocab_size,
@@ -58,6 +64,9 @@ def load_model(opt):
         dec_tgtLang_oh=model_opt.dec_tgtLang_oh,
         srcLangIdx2oneHotIdx=model_opt.srcLangIdx2oneHotIdx,
         tgtLangIdx2oneHotIdx=model_opt.tgtLangIdx2oneHotIdx,
+        share_bidir=model_opt.share_bidir,
+        share_enc_dec=model_opt.share_enc_dec,
+        share_dec_temp=model_opt.share_dec_temp,
         cuda=opt.cuda)
 
     modelRNN.load_state_dict(checkpoint['model'])
