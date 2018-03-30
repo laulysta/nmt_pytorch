@@ -598,22 +598,22 @@ class NMTmodelRNN(nn.Module):
             "To share the encoder and decoder RNN, the input matrix size shall be the same."
             self.encoder.rnn.weight_ih_l0 = self.decoder.rnn1.weight_ih_l0
             self.encoder.rnn.weight_hh_l0 = self.decoder.rnn1.weight_hh_l0
-            self.encoder.rnn.bias_ih_l0 = self.decoder.rnn1.bias_ih_l0
-            self.encoder.rnn.bias_hh_l0 = self.decoder.rnn1.bias_hh_l0
+            #self.encoder.rnn.bias_ih_l0 = self.decoder.rnn1.bias_ih_l0
+            #self.encoder.rnn.bias_hh_l0 = self.decoder.rnn1.bias_hh_l0
 
             self.encoder.rnn.weight_ih_l0_reverse = self.decoder.rnn1.weight_ih_l0
             self.encoder.rnn.weight_hh_l0_reverse = self.decoder.rnn1.weight_hh_l0
-            self.encoder.rnn.bias_ih_l0_reverse = self.decoder.rnn1.bias_ih_l0
-            self.encoder.rnn.bias_hh_l0_reverse = self.decoder.rnn1.bias_hh_l0
+            #self.encoder.rnn.bias_ih_l0_reverse = self.decoder.rnn1.bias_ih_l0
+            #self.encoder.rnn.bias_hh_l0_reverse = self.decoder.rnn1.bias_hh_l0
         elif share_bidir:
             self.encoder.rnn.weight_ih_l0_reverse = self.encoder.rnn.weight_ih_l0
             self.encoder.rnn.weight_hh_l0_reverse = self.encoder.rnn.weight_hh_l0
-            self.encoder.rnn.bias_ih_l0_reverse = self.encoder.rnn.bias_ih_l0
-            self.encoder.rnn.bias_hh_l0_reverse = self.encoder.rnn.bias_hh_l0
+            #self.encoder.rnn.bias_ih_l0_reverse = self.encoder.rnn.bias_ih_l0
+            #self.encoder.rnn.bias_hh_l0_reverse = self.encoder.rnn.bias_hh_l0
 
         if share_dec_temp:
             self.decoder.rnn2.weight_hh_l0 = self.decoder.rnn1.weight_hh_l0
-            self.decoder.rnn2.bias_hh_l0 = self.decoder.rnn1.bias_hh_l0
+            #self.decoder.rnn2.bias_hh_l0 = self.decoder.rnn1.bias_hh_l0
 
         if embs_share_weight:
             # Share the weight matrix between src/tgt word embeddings
