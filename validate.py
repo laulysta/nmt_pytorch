@@ -17,6 +17,7 @@ from DataLoader import DataLoader
 
 from torch.autograd import Variable
 import subprocess
+import pickle
 
 
 def load_model(opt):
