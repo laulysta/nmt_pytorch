@@ -130,7 +130,7 @@ def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, srcLang_path=None, t
 
     return data_set
 
-def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_file_name='bleu_scores.txt'):
+def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_file_name='bleu_scores.txt', detok_lang=''):
     model_translate.eval()
     with open(output_name, 'w') as f:
         for batch in tqdm(data_set, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
@@ -176,9 +176,16 @@ def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_
                     f.write(pred_line + '\n')
                 else:
                     f.write('\n')
+
     try:
         #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
-        out = subprocess.check_output("perl multi-bleu.perl " + ref + " < " + output_name, shell=True)
+        if detok_lang:
+            _ = subprocess.check_output("sed -r 's/(@@ )|(@@ ?$)//g' < " + output_name + " > " + output_name, shell=True)
+            _ = subprocess.check_output("perl detokenizer.perl -l " +  + " < " + output_name + " > " + output_name, shell=True)
+            out = subprocess.check_output("cat " + output_name + " | sacrebleu " + ref, shell=True)
+        else:
+            out = subprocess.check_output("perl multi-bleu.perl " + ref + " < " + output_name, shell=True)
+
         out = out.decode() # because out is binary
         valid_BLEU = float(out.strip().split()[2][:-1])
     except:
@@ -220,6 +227,8 @@ def main():
 
     parser.add_argument('-bleu_file_name', type=str, help='Full path to BLEU file')
 
+    parser.add_argument('-detok_lang', type=str, default='', help='Language of the folder. Ex: en, fr, de ...')
+
     opt = parser.parse_args()
     
     opt.cuda = not opt.no_cuda
@@ -253,7 +262,7 @@ def main():
     data_set = prepare_data(opt.val, src_word2idx, tgt_word2idx, opt, tgtLang_path=opt.val_tgtlang, srcLang_path=opt.val_srclang)
 
     translate_data(model_translate, data_set, output_name, model_opt, opt.ref,
-        bleu_file_name=opt.bleu_file_name)
+        bleu_file_name=opt.bleu_file_name, detok_lang=opt.detok_lang)
 
 if __name__ == '__main__':
     main()
