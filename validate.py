@@ -177,20 +177,22 @@ def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_
                 else:
                     f.write('\n')
 
-    try:
-        #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
-        if detok_lang:
-            _ = subprocess.check_output("sed -r 's/(@@ )|(@@ ?$)//g' < " + output_name + " > " + output_name, shell=True)
-            _ = subprocess.check_output("perl detokenizer.perl -l " +  + " < " + output_name + " > " + output_name, shell=True)
-            out = subprocess.check_output("cat " + output_name + " | sacrebleu " + ref, shell=True)
-        else:
-            out = subprocess.check_output("perl multi-bleu.perl " + ref + " < " + output_name, shell=True)
+    #try:
+    #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
+    if detok_lang:
+        output_name_noBPE = output_name + '_noBPE'
+        _ = subprocess.check_output("sed -r 's/(@@ )|(@@ ?$)//g' < " + output_name + " > " + output_name_noBPE, shell=True)
+        output_name_detok = output_name+ '_detok'
+        _ = subprocess.check_output("perl detokenizer.perl -l " + detok_lang + " < " + output_name_noBPE + " > " + output_name_detok, shell=True)
+        out = subprocess.check_output("cat " + output_name_detok + " | sacrebleu " + ref, shell=True)
+    else:
+        out = subprocess.check_output("perl multi-bleu.perl " + ref + " < " + output_name, shell=True)
 
-        out = out.decode() # because out is binary
-        valid_BLEU = float(out.strip().split()[2][:-1])
-    except:
-        out = "multi-bleu.perl error"
-        valid_BLEU = -1.0
+    out = out.decode() # because out is binary
+    valid_BLEU = float(out.strip().split()[2][:-1])
+    #except:
+    #    out = "multi-bleu.perl error"
+    #    valid_BLEU = -1.0
 
     #print(out)
     #import ipdb; ipdb.set_trace()
