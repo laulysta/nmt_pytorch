@@ -550,7 +550,8 @@ class Decoder(nn.Module):
         return gen_idx
 
     def beam_search(self, h_in, h_in_len, width, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None): # (batch_size, x_seq_len, D_hid_enc * num_dir_enc)
-        voc_size, batch_size, x_seq_len = self.vocab_size[ self.trg ], h_in.size()[0], h_in.size()[1]
+        h_in_len = h_in_len.data.view(-1).tolist()
+        voc_size, batch_size, x_seq_len = self.n_tgt_vocab, h_in.size()[0], h_in.size()[1]
         live = [ [ ( 0.0, [ 2 ], 2 ) ] for ii in range(batch_size) ]
         dead = [ [] for ii in range(batch_size) ]
         num_dead = [0 for ii in range(batch_size)]
