@@ -335,7 +335,7 @@ class Decoder(nn.Module):
         h_in_len = h_in_len.data.view(-1)
         xmask = xlen_to_mask_rnn(h_in_len.tolist(), self.tt) # (batch_size, x_seq_len)
 
-        s_0_ = torch.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
+        s_0_ = torch.sum(h_in, 1) # (batch_size, d_ctx)
         s_0_ = torch.div( s_0_, Variable(self.tt.FloatTensor(h_in_len.tolist()).view(-1,1)) )
         s_0_andMore = s_0_
         if src_lang_oneHot is not None:
@@ -377,13 +377,13 @@ class Decoder(nn.Module):
             #ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, -1) \
             #        # (batch_size, d_model * n_layers)
 
-            # in (batch_size, 1, D_emb_dec)
-            # s_t (num_layers_dec, batch_size, D_hid_dec)
+            # in (batch_size, 1, d_word_vec)
+            # s_t (n_layers, batch_size, d_model)
             _, s_t_ = self.rnn1( y_in_emb[:,idx,:][:,None,:], s_t )
-            # out (batch_size, 1, D_hid_dec)
-            # s_t (num_layers_dec, batch_size, D_hid_dec)
+            # out (batch_size, 1, d_model)
+            # s_t (n_layers, batch_size, d_model)
             ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size, -1) \
-                    # (batch_size, D_hid_dec * num_layers_dec)
+                    # (batch_size, d_model * n_layers)
 
 
             ctx_y = self.y_to_ctx( y_in_emb[:,idx,:] )[:,None,:] # (batch_size, 1, d_ctx)
@@ -466,7 +466,7 @@ class Decoder(nn.Module):
         #     y_in_emb_andMore = torch.cat((tgt_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
 
         h_in_big = h_in.contiguous().view(batch_size * x_seq_len, self.d_ctx ) \
-                # (batch_size * x_seq_len, D_hid_enc * num_dir_enc) 
+                # (batch_size * x_seq_len, d_ctx) 
         ctx_h = self.h_to_ctx( h_in_big ).view(batch_size, x_seq_len, self.d_ctx)
 
         gen_idx = [[] for ii in range(batch_size)]
@@ -479,10 +479,10 @@ class Decoder(nn.Module):
             # ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, self.n_layers * self.d_model) \
             #         # (batch_size, n_layers * d_model)
             _, s_t_ = self.rnn1( y_in_emb, s_t )
-            # out (batch_size, 1, D_hid_dec)
-            # s_t (num_layers_dec, batch_size, D_hid_dec)
+            # out (batch_size, 1, d_model)
+            # s_t (n_layers, batch_size, d_model)
             ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size, self.n_layers * self.d_model) \
-                    # (batch_size, num_layers_dec * D_hid_dec)
+                    # (batch_size, n_layers * d_model)
 
             ctx_y = self.y_to_ctx( y_in_emb.view(batch_size, self.d_word_vec) )[:,None,:]
             ctx_s = self.s_to_ctx( ctx_s_t_ )[:,None,:]
@@ -508,8 +508,8 @@ class Decoder(nn.Module):
             # s_t (n_layers, batch_size, d_model)
             #out, s_t = self.rnn( torch.cat((y_in_emb_andMore[:,0,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
             out, s_t = self.rnn2( c_t_andMore[:,None,:], s_t_ )
-            # out (batch_size, 1, D_hid_dec)
-            # s_t (num_layers_dec, batch_size, D_hid_dec)
+            # out (batch_size, 1, d_model)
+            # s_t (n_layers, batch_size, d_model)
 
             if idx == 0 and l_in is not None:
                 start = [2 for ii in range(batch_size)] # NOTE <BOS> is always 2
@@ -549,7 +549,7 @@ class Decoder(nn.Module):
 
         return gen_idx
 
-    def beam_search(self, h_in, h_in_len, width, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None): # (batch_size, x_seq_len, D_hid_enc * num_dir_enc)
+    def beam_search(self, h_in, h_in_len, width, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None): # (batch_size, x_seq_len, d_ctx)
         h_in_len = h_in_len.data.view(-1).tolist()
         voc_size, batch_size, x_seq_len = self.n_tgt_vocab, h_in.size()[0], h_in.size()[1]
         live = [ [ ( 0.0, [ 2 ], 2 ) ] for ii in range(batch_size) ]
@@ -557,17 +557,17 @@ class Decoder(nn.Module):
         num_dead = [0 for ii in range(batch_size)]
         xmask = xlen_to_mask_rnn(h_in_len, self.tt)[:,None,:] # (batch_size, 1, x_seq_len)
 
-        s_t = torch.sum(h_in, 1) # (batch_size, D_hid_enc * num_dir_enc)
+        s_t = torch.sum(h_in, 1) # (batch_size, d_ctx)
         s_t = torch.div( s_t, Variable(self.tt.FloatTensor(h_in_len).view(batch_size, 1)) )
         s_t_andMore = s_t
         if src_lang_oneHot is not None:
             s_t_andMore = torch.cat((src_lang_oneHot, s_t_andMore), dim=1)
         if tgt_lang_oneHot is not None:
             s_t_andMore = torch.cat((tgt_lang_oneHot, s_t_andMore), dim=1)
-        s_t = self.ctx_to_s0(s_t) # (batch_size, num_layers_dec * D_hid_dec)
+        s_t = self.ctx_to_s0(s_t) # (batch_size, n_layers * d_model)
         s_t = F.tanh(s_t)
-        s_t = s_t.view(batch_size, self.num_layers_dec, self.D_hid_dec).transpose(0,1).contiguous() \
-                # (num_layers_dec, batch_size, D_hid_dec)
+        s_t = s_t.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
+                # (n_layers, batch_size, d_model)
 
         if l_in is not None:
             input = self.emb(l_in)# (batch_size, 1, d_word_vec)
@@ -575,35 +575,35 @@ class Decoder(nn.Module):
             ft = self.tt.LongTensor( [ 2 for ii in range(batch_size) ] )[:,None]
             input = self.emb( Variable( ft ) ) # (batch_size, 1, D_emb)
 
-        h_in_big = h_in.contiguous().view(-1, self.D_hid_enc * self.num_dir_enc ) \
-                # (batch_size * x_seq_len, D_hid_enc * num_dir_enc)
-        ctx_h = self.h_to_ctx( h_in_big ).view(batch_size, 1, x_seq_len, self.D_ctx) \
-                # NOTE (batch_size, 1, x_seq_len, D_ctx)
+        h_in_big = h_in.contiguous().view(-1, self.d_ctx ) \
+                # (batch_size * x_seq_len, d_ctx)
+        ctx_h = self.h_to_ctx( h_in_big ).view(batch_size, 1, x_seq_len, self.d_ctx) \
+                # NOTE (batch_size, 1, x_seq_len, d_ctx)
 
         #max_len_gen = max(h_in_len) + self.dec_trg_offset
         #for tidx in range(max_len_gen):
         for idx in range(self.n_max_seq):
             cwidth = 1 if tidx == 0 else width
-            # input (batch_size * width, 1, D_emb_dec)
-            # s_t (num_layers_dec, batch_size * width, D_hid_dec)
+            # input (batch_size * width, 1, d_word_vec)
+            # s_t (n_layers, batch_size * width, d_model)
             _, s_t_ = self.rnn1( input, s_t )
-            # out (batch_size * width, 1, D_hid_dec)
-            # s_t (num_layers_dec, batch_size * width, D_hid_dec)
+            # out (batch_size * width, 1, d_model)
+            # s_t (n_layers, batch_size * width, d_model)
             ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size * cwidth, -1) \
-                    # (batch_size * width, num_layers_dec * D_hid_dec)
+                    # (batch_size * width, n_layers * d_model)
 
-            ctx_y = self.y_to_ctx( input.view(-1, self.D_emb_dec) ).view(batch_size, cwidth, 1, self.D_ctx)
-            ctx_s = self.s_to_ctx( ctx_s_t_ ).view(batch_size, cwidth, 1, self.D_ctx)
+            ctx_y = self.y_to_ctx( input.view(-1, self.d_word_vec) ).view(batch_size, cwidth, 1, self.D_ctx)
+            ctx_s = self.s_to_ctx( ctx_s_t_ ).view(batch_size, cwidth, 1, self.d_ctx)
             ctx = F.tanh(ctx_y + ctx_s + ctx_h) # (batch_size, cwidth, x_seq_len, D_ctx)
-            ctx = ctx.view(batch_size * cwidth * x_seq_len, self.D_ctx)
+            ctx = ctx.view(batch_size * cwidth * x_seq_len, self.d_ctx)
 
             score = self.ctx_to_score(ctx).view(batch_size, -1, x_seq_len) # (batch_size, cwidth, x_seq_len)
             score.data.masked_fill_(xmask.repeat(1, cwidth, 1), -float('inf'))
             score = F.softmax( score.view(-1, x_seq_len) ).view(batch_size, -1, x_seq_len)
             score = score.view(batch_size, cwidth, x_seq_len, 1) # (batch_size, width, x_seq_len, 1)
 
-            c_t = torch.mul( h_in.view(batch_size, 1, x_seq_len, -1), score ) # (batch_size, width, x_seq_len, D_hid_enc * num_dir_enc)
-            c_t = torch.sum( c_t, 2).view(batch_size * cwidth, -1) # (batch_size * width, D_hid_enc * num_dir_enc)
+            c_t = torch.mul( h_in.view(batch_size, 1, x_seq_len, -1), score ) # (batch_size, width, x_seq_len, d_ctx)
+            c_t = torch.sum( c_t, 2).view(batch_size * cwidth, -1) # (batch_size * width, d_ctx)
             
             c_t_andMore = c_t
             if src_lang_oneHot is not None:
@@ -613,15 +613,15 @@ class Decoder(nn.Module):
                 c_t_andMore = torch.cat((tgt_lang_oneHot, c_t_andMore), dim=1)
 
 
-            # c_t (batch_size * width, 1, D_hid_enc * num_dir_enc)
-            # s_t (num_layers_dec, batch_size * width, D_hid_dec)
+            # c_t (batch_size * width, 1, d_ctx)
+            # s_t (n_layers, batch_size * width, d_model)
             out, s_t = self.rnn2( c_t_andMore[:,None,:], s_t_ )
-            # out (batch_size * width, 1, D_hid_dec)
-            # s_t (num_layers_dec, batch_size * width, D_hid_dec)
+            # out (batch_size * width, 1, d_model)
+            # s_t (n_layers, batch_size * width, d_model)
 
-            fin_y = self.y_to_fin( input.view(-1, self.D_emb_dec) ) # (batch_size * width, D_fin)
+            fin_y = self.y_to_fin( input.view(-1, self.d_word_vec) ) # (batch_size * width, D_fin)
             fin_c = self.c_to_fin( c_t ) # (batch_size * width, D_fin)
-            fin_s = self.s_to_fin( out.view(-1, self.D_hid_dec) ) # (batch_size * width, D_fin)
+            fin_s = self.s_to_fin( out.view(-1, self.d_model) ) # (batch_size * width, D_fin)
             fin = F.tanh( fin_y + fin_c + fin_s )
 
             cur_prob = F.log_softmax( self.fin_to_voc( fin.view(-1, self.D_fin) ))\
@@ -662,12 +662,12 @@ class Decoder(nn.Module):
 
             in_vocab_idx = [ [ x[2] % voc_size for x in ee ] for ee in live ] # NOTE batch_size first
             input = self.emb( Variable( self.tt.LongTensor( in_vocab_idx ) ).view(-1) )\
-                    .view(-1, 1, self.D_emb_dec) # input (batch_size * width, 1, D_emb)
+                    .view(-1, 1, self.d_word_vec) # input (batch_size * width, 1, D_emb)
 
             in_width_idx = [ [ x[2] // voc_size + bbidx * cwidth for x in ee ] for bbidx, ee in enumerate(live) ] \
                     # live : (batch_size, width)
             s_t = s_t.index_select( 1, Variable( self.tt.LongTensor( in_width_idx ).view(-1) ) ).\
-                    view(self.num_layers_dec, batch_size * width, self.D_hid_dec)
+                    view(self.n_layers, batch_size * width, self.d_model)
             # h_0 (num_layers, batch_size * width, D_hid)
 
         for bidx in range(batch_size):
