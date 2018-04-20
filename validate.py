@@ -17,6 +17,7 @@ from DataLoader import DataLoader
 
 from torch.autograd import Variable
 import subprocess
+import pickle
 
 
 def load_model(opt):
@@ -129,7 +130,7 @@ def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, srcLang_path=None, t
 
     return data_set
 
-def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_file_name='bleu_scores.txt'):
+def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_file_name='bleu_scores.txt', detok_lang=''):
     model_translate.eval()
     with open(output_name, 'w') as f:
         for batch in tqdm(data_set, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
@@ -175,14 +176,23 @@ def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_
                     f.write(pred_line + '\n')
                 else:
                     f.write('\n')
-    try:
-        #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
+
+    #try:
+    #out = subprocess.check_output("perl multi-bleu.perl data/multi30k/val.de.atok < trained_epoch0_accu31.219.chkpt.output.dev", shell=True)
+    if detok_lang:
+        output_name_noBPE = output_name + '_noBPE'
+        _ = subprocess.check_output("sed -r 's/(@@ )|(@@ ?$)//g' < " + output_name + " > " + output_name_noBPE, shell=True)
+        output_name_detok = output_name+ '_detok'
+        _ = subprocess.check_output("perl detokenizer.perl -l " + detok_lang + " < " + output_name_noBPE + " > " + output_name_detok, shell=True)
+        out = subprocess.check_output("cat " + output_name_detok + " | sacrebleu " + ref, shell=True)
+    else:
         out = subprocess.check_output("perl multi-bleu.perl " + ref + " < " + output_name, shell=True)
-        out = out.decode() # because out is binary
-        valid_BLEU = float(out.strip().split()[2][:-1])
-    except:
-        out = "multi-bleu.perl error"
-        valid_BLEU = -1.0
+
+    out = out.decode() # because out is binary
+    valid_BLEU = float(out.strip().split()[2][:-1])
+    #except:
+    #    out = "multi-bleu.perl error"
+    #    valid_BLEU = -1.0
 
     #print(out)
     #import ipdb; ipdb.set_trace()
@@ -219,6 +229,8 @@ def main():
 
     parser.add_argument('-bleu_file_name', type=str, help='Full path to BLEU file')
 
+    parser.add_argument('-detok_lang', type=str, default='', help='Language of the folder. Ex: en, fr, de ...')
+
     opt = parser.parse_args()
     
     opt.cuda = not opt.no_cuda
@@ -252,7 +264,7 @@ def main():
     data_set = prepare_data(opt.val, src_word2idx, tgt_word2idx, opt, tgtLang_path=opt.val_tgtlang, srcLang_path=opt.val_srclang)
 
     translate_data(model_translate, data_set, output_name, model_opt, opt.ref,
-        bleu_file_name=opt.bleu_file_name)
+        bleu_file_name=opt.bleu_file_name, detok_lang=opt.detok_lang)
 
 if __name__ == '__main__':
     main()
