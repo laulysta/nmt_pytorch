@@ -233,7 +233,7 @@ def main():
 
     parser.add_argument('-detok_lang', type=str, default='', help='Language of the folder. Ex: en, fr, de ...')
 
-    parser.add_argument('-beam_size', type=int, default=1)
+    parser.add_argument('-beam_size', type=int, default=5)
 
     opt = parser.parse_args()
     
