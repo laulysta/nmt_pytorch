@@ -612,10 +612,14 @@ class Decoder(nn.Module):
             
             c_t_andMore = c_t
             if src_lang_oneHot is not None:
-                c_t_andMore = torch.cat((src_lang_oneHot, c_t_andMore), dim=1)
+                #c_t_andMore = torch.cat((src_lang_oneHot, c_t_andMore), dim=1)
+                tmp_repeat = src_lang_oneHot.repeat(int(c_t_andMore.shape[0]/src_lang_oneHot.shape[0]), 1)
+                c_t_andMore = torch.cat((tmp_repeat, c_t_andMore), dim=1)
 
             if tgt_lang_oneHot is not None:
-                c_t_andMore = torch.cat((tgt_lang_oneHot, c_t_andMore), dim=1)
+                #c_t_andMore = torch.cat((tgt_lang_oneHot, c_t_andMore), dim=1)
+                tmp_repeat = tgt_lang_oneHot.repeat(int(c_t_andMore.shape[0]/tgt_lang_oneHot.shape[0]), 1)
+                c_t_andMore = torch.cat((tmp_repeat, c_t_andMore), dim=1)
 
 
             # c_t (batch_size * width, 1, d_ctx)
