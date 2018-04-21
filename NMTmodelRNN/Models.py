@@ -1,4 +1,7 @@
 ''' Define the NMTmodelRNN model '''
+import operator
+import math
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -325,6 +328,7 @@ class Decoder(nn.Module):
         self.n_tgt_vocab = n_tgt_vocab
         self.d_word_vec = d_word_vec
         self.n_max_seq = n_max_seq
+        self.beam_alpha = 0.6
 
     def forward(self, h_in, h_in_len, y_in, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
@@ -582,7 +586,7 @@ class Decoder(nn.Module):
 
         #max_len_gen = max(h_in_len) + self.dec_trg_offset
         #for tidx in range(max_len_gen):
-        for idx in range(self.n_max_seq):
+        for tidx in range(self.n_max_seq):
             cwidth = 1 if tidx == 0 else width
             # input (batch_size * width, 1, d_word_vec)
             # s_t (n_layers, batch_size * width, d_model)
@@ -592,7 +596,7 @@ class Decoder(nn.Module):
             ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size * cwidth, -1) \
                     # (batch_size * width, n_layers * d_model)
 
-            ctx_y = self.y_to_ctx( input.view(-1, self.d_word_vec) ).view(batch_size, cwidth, 1, self.D_ctx)
+            ctx_y = self.y_to_ctx( input.view(-1, self.d_word_vec) ).view(batch_size, cwidth, 1, self.d_ctx)
             ctx_s = self.s_to_ctx( ctx_s_t_ ).view(batch_size, cwidth, 1, self.d_ctx)
             ctx = F.tanh(ctx_y + ctx_s + ctx_h) # (batch_size, cwidth, x_seq_len, D_ctx)
             ctx = ctx.view(batch_size * cwidth * x_seq_len, self.d_ctx)
@@ -618,13 +622,20 @@ class Decoder(nn.Module):
             out, s_t = self.rnn2( c_t_andMore[:,None,:], s_t_ )
             # out (batch_size * width, 1, d_model)
             # s_t (n_layers, batch_size * width, d_model)
+            
+            if tidx == 0 and l_in is not None:
+                start = [2 for ii in range(batch_size)] # NOTE <BOS> is always 2
+                ft = self.tt.LongTensor(start)[:,None] # (batch_size, 1)
 
-            fin_y = self.y_to_fin( input.view(-1, self.d_word_vec) ) # (batch_size * width, D_fin)
-            fin_c = self.c_to_fin( c_t ) # (batch_size * width, D_fin)
-            fin_s = self.s_to_fin( out.view(-1, self.d_model) ) # (batch_size * width, D_fin)
+                input = self.emb( Variable( ft ) ) # (batch_size, 1, d_word_vec)
+                continue
+
+            fin_y = self.y_to_fin( input.view(-1, self.d_word_vec) ) # (batch_size * width, d_word_vec)
+            fin_c = self.c_to_fin( c_t ) # (batch_size * width, d_word_vec)
+            fin_s = self.s_to_fin( out.view(-1, self.d_model) ) # (batch_size * width, d_word_vec)
             fin = F.tanh( fin_y + fin_c + fin_s )
 
-            cur_prob = F.log_softmax( self.fin_to_voc( fin.view(-1, self.D_fin) ))\
+            cur_prob = F.log_softmax( self.fin_to_voc( fin.view(-1, self.d_word_vec) ))\
                     .view(batch_size, cwidth, voc_size).data # (batch_size, width, vocab_size)
             pre_prob = self.tt.FloatTensor( [ [ x[0] for x in ee ] for ee in live ] ).view(batch_size, cwidth, 1) \
                     # (batch_size, width, 1)

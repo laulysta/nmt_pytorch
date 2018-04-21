@@ -159,8 +159,8 @@ def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_
             src_lang_oneHot_forDec = model_translate.lang2oneHot(src_lang_seq, model_opt.srcLangIdx2oneHotIdx)[sent_sort_idx] if model_opt.dec_srcLang_oh else None
             tgt_lang_oneHot_forDec = model_translate.lang2oneHot(tgt_lang_seq, model_opt.tgtLangIdx2oneHotIdx)[sent_sort_idx] if model_opt.dec_tgtLang_oh else None
 
-            # all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx],
-            #     l_in=tgt_lang_seq_forDec, src_lang_oneHot=src_lang_oneHot_forDec, tgt_lang_oneHot=tgt_lang_oneHot_forDec)
+            #all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx],
+            #    l_in=tgt_lang_seq_forDec, src_lang_oneHot=src_lang_oneHot_forDec, tgt_lang_oneHot=tgt_lang_oneHot_forDec)
             all_hyp = model_translate.decoder.beam_search(enc_output, lengths_seq_src[sent_sort_idx], beam_size,
                 l_in=tgt_lang_seq_forDec, src_lang_oneHot=src_lang_oneHot_forDec, tgt_lang_oneHot=tgt_lang_oneHot_forDec)
 
@@ -174,7 +174,7 @@ def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_
                 if len(idx_seq) > 0: 
                     if idx_seq[-1] == Constants.EOS: # if last word is EOS
                         idx_seq = idx_seq[:-1]
-                    pred_line = ' '.join([data_set.tgt_idx2word[idx] for idx in idx_seq])
+                    pred_line = ' '.join([data_set.tgt_idx2word[idx] for idx in idx_seq[1:]]) # idx_seq[1:] to remove BOS with beam_search
                     f.write(pred_line + '\n')
                 else:
                     f.write('\n')
