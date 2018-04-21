@@ -568,7 +568,7 @@ class Decoder(nn.Module):
             s_t_andMore = torch.cat((src_lang_oneHot, s_t_andMore), dim=1)
         if tgt_lang_oneHot is not None:
             s_t_andMore = torch.cat((tgt_lang_oneHot, s_t_andMore), dim=1)
-        s_t = self.ctx_to_s0(s_t) # (batch_size, n_layers * d_model)
+        s_t = self.ctx_to_s0(s_t_andMore) # (batch_size, n_layers * d_model)
         s_t = F.tanh(s_t)
         s_t = s_t.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
                 # (n_layers, batch_size, d_model)
