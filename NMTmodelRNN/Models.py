@@ -1,4 +1,7 @@
 ''' Define the NMTmodelRNN model '''
+import operator
+import math
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -325,6 +328,7 @@ class Decoder(nn.Module):
         self.n_tgt_vocab = n_tgt_vocab
         self.d_word_vec = d_word_vec
         self.n_max_seq = n_max_seq
+        self.beam_alpha = 0.6
 
     def forward(self, h_in, h_in_len, y_in, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None):
         # h_in : (batch_size, x_seq_len, d_ctx)
@@ -548,6 +552,148 @@ class Decoder(nn.Module):
             #     y_in_emb_andMore = torch.cat((tgt_lang_oneHot[:,None,:], y_in_emb_andMore), dim=2)
 
         return gen_idx
+
+
+    def beam_search(self, h_in, h_in_len, width, l_in=None, src_lang_oneHot=None, tgt_lang_oneHot=None): # (batch_size, x_seq_len, d_ctx)
+        h_in_len = h_in_len.data.view(-1).tolist()
+        voc_size, batch_size, x_seq_len = self.n_tgt_vocab, h_in.size()[0], h_in.size()[1]
+        live = [ [ ( 0.0, [ 2 ], 2 ) ] for ii in range(batch_size) ]
+        dead = [ [] for ii in range(batch_size) ]
+        num_dead = [0 for ii in range(batch_size)]
+        xmask = xlen_to_mask_rnn(h_in_len, self.tt)[:,None,:] # (batch_size, 1, x_seq_len)
+
+        s_t = torch.sum(h_in, 1) # (batch_size, d_ctx)
+        s_t = torch.div( s_t, Variable(self.tt.FloatTensor(h_in_len).view(batch_size, 1)) )
+        s_t_andMore = s_t
+        if src_lang_oneHot is not None:
+            s_t_andMore = torch.cat((src_lang_oneHot, s_t_andMore), dim=1)
+        if tgt_lang_oneHot is not None:
+            s_t_andMore = torch.cat((tgt_lang_oneHot, s_t_andMore), dim=1)
+        s_t = self.ctx_to_s0(s_t) # (batch_size, n_layers * d_model)
+        s_t = F.tanh(s_t)
+        s_t = s_t.view(batch_size, self.n_layers, self.d_model).transpose(0,1).contiguous() \
+                # (n_layers, batch_size, d_model)
+
+        if l_in is not None:
+            input = self.emb(l_in)# (batch_size, 1, d_word_vec)
+        else:
+            ft = self.tt.LongTensor( [ 2 for ii in range(batch_size) ] )[:,None]
+            input = self.emb( Variable( ft ) ) # (batch_size, 1, D_emb)
+
+        h_in_big = h_in.contiguous().view(-1, self.d_ctx ) \
+                # (batch_size * x_seq_len, d_ctx)
+        ctx_h = self.h_to_ctx( h_in_big ).view(batch_size, 1, x_seq_len, self.d_ctx) \
+                # NOTE (batch_size, 1, x_seq_len, d_ctx)
+
+        #max_len_gen = max(h_in_len) + self.dec_trg_offset
+        #for tidx in range(max_len_gen):
+        for tidx in range(self.n_max_seq):
+            cwidth = 1 if tidx == 0 else width
+            # input (batch_size * width, 1, d_word_vec)
+            # s_t (n_layers, batch_size * width, d_model)
+            _, s_t_ = self.rnn1( input, s_t )
+            # out (batch_size * width, 1, d_model)
+            # s_t (n_layers, batch_size * width, d_model)
+            ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size * cwidth, -1) \
+                    # (batch_size * width, n_layers * d_model)
+
+            ctx_y = self.y_to_ctx( input.view(-1, self.d_word_vec) ).view(batch_size, cwidth, 1, self.d_ctx)
+            ctx_s = self.s_to_ctx( ctx_s_t_ ).view(batch_size, cwidth, 1, self.d_ctx)
+            ctx = F.tanh(ctx_y + ctx_s + ctx_h) # (batch_size, cwidth, x_seq_len, D_ctx)
+            ctx = ctx.view(batch_size * cwidth * x_seq_len, self.d_ctx)
+
+            score = self.ctx_to_score(ctx).view(batch_size, -1, x_seq_len) # (batch_size, cwidth, x_seq_len)
+            score.data.masked_fill_(xmask.repeat(1, cwidth, 1), -float('inf'))
+            score = F.softmax( score.view(-1, x_seq_len) ).view(batch_size, -1, x_seq_len)
+            score = score.view(batch_size, cwidth, x_seq_len, 1) # (batch_size, width, x_seq_len, 1)
+
+            c_t = torch.mul( h_in.view(batch_size, 1, x_seq_len, -1), score ) # (batch_size, width, x_seq_len, d_ctx)
+            c_t = torch.sum( c_t, 2).view(batch_size * cwidth, -1) # (batch_size * width, d_ctx)
+            
+            c_t_andMore = c_t
+            if src_lang_oneHot is not None:
+                c_t_andMore = torch.cat((src_lang_oneHot, c_t_andMore), dim=1)
+
+            if tgt_lang_oneHot is not None:
+                c_t_andMore = torch.cat((tgt_lang_oneHot, c_t_andMore), dim=1)
+
+
+            # c_t (batch_size * width, 1, d_ctx)
+            # s_t (n_layers, batch_size * width, d_model)
+            out, s_t = self.rnn2( c_t_andMore[:,None,:], s_t_ )
+            # out (batch_size * width, 1, d_model)
+            # s_t (n_layers, batch_size * width, d_model)
+            
+            if tidx == 0 and l_in is not None:
+                start = [2 for ii in range(batch_size)] # NOTE <BOS> is always 2
+                ft = self.tt.LongTensor(start)[:,None] # (batch_size, 1)
+
+                input = self.emb( Variable( ft ) ) # (batch_size, 1, d_word_vec)
+                continue
+
+            fin_y = self.y_to_fin( input.view(-1, self.d_word_vec) ) # (batch_size * width, d_word_vec)
+            fin_c = self.c_to_fin( c_t ) # (batch_size * width, d_word_vec)
+            fin_s = self.s_to_fin( out.view(-1, self.d_model) ) # (batch_size * width, d_word_vec)
+            fin = F.tanh( fin_y + fin_c + fin_s )
+
+            cur_prob = F.log_softmax( self.fin_to_voc( fin.view(-1, self.d_word_vec) ))\
+                    .view(batch_size, cwidth, voc_size).data # (batch_size, width, vocab_size)
+            pre_prob = self.tt.FloatTensor( [ [ x[0] for x in ee ] for ee in live ] ).view(batch_size, cwidth, 1) \
+                    # (batch_size, width, 1)
+            total_prob = cur_prob + pre_prob # (batch_size, cwidth, voc_size)
+            total_prob = total_prob.view(batch_size, -1)
+
+            _, topi_s = total_prob.topk(width, dim=1)
+            topv_s = cur_prob.view(batch_size, -1).gather(1, topi_s)
+            # (batch_size, width)
+
+            new_live = [ [] for ii in range(batch_size) ]
+            for bidx in range(batch_size):
+                num_live = width - num_dead[bidx]
+                if num_live > 0:
+                    tis = topi_s[bidx][:num_live]
+                    tvs = topv_s[bidx][:num_live]
+                    for eidx, (topi, topv) in enumerate(zip(tis, tvs)): # NOTE max width times
+                        if topi % voc_size == 3 :
+                            dead[bidx].append( (  live[bidx][ topi // voc_size ][0] + topv, \
+                                                  live[bidx][ topi // voc_size ][1] + [ topi % voc_size ],\
+                                                  topi) )
+                            num_dead[bidx] += 1
+                        else:
+                            new_live[bidx].append( (    live[bidx][ topi // voc_size ][0] + topv, \
+                                                        live[bidx][ topi // voc_size ][1] + [ topi % voc_size ],\
+                                                        topi) )
+                while len(new_live[bidx]) < width:
+                    new_live[bidx].append( (    -99999999999, \
+                                                [0],\
+                                                0) )
+            live = new_live
+
+            if num_dead == [width for ii in range(batch_size)]:
+                break
+
+            in_vocab_idx = [ [ x[2] % voc_size for x in ee ] for ee in live ] # NOTE batch_size first
+            input = self.emb( Variable( self.tt.LongTensor( in_vocab_idx ) ).view(-1) )\
+                    .view(-1, 1, self.d_word_vec) # input (batch_size * width, 1, D_emb)
+
+            in_width_idx = [ [ x[2] // voc_size + bbidx * cwidth for x in ee ] for bbidx, ee in enumerate(live) ] \
+                    # live : (batch_size, width)
+            s_t = s_t.index_select( 1, Variable( self.tt.LongTensor( in_width_idx ).view(-1) ) ).\
+                    view(self.n_layers, batch_size * width, self.d_model)
+            # h_0 (num_layers, batch_size * width, D_hid)
+
+        for bidx in range(batch_size):
+            if num_dead[bidx] < width:
+                for didx in range( width - num_dead[bidx] ):
+                    (a, b, c) = live[bidx][didx]
+                    dead[bidx].append( (a, b, c)  )
+
+        dead_ = [ [ ( a / ( math.pow(5+len(b), self.beam_alpha) / math.pow(5+1, self.beam_alpha) ) , b, c) for (a,b,c) in ee] for ee in dead]
+        ans = []
+        for dd_ in dead_:
+            dd = sorted( dd_, key=operator.itemgetter(0), reverse=True )
+            ans.append( dd[0][1] )
+        return ans
 
 
 #class NMTmodel(nn.Module):

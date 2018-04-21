@@ -130,7 +130,7 @@ def prepare_data(src_path, src_word2idx, tgt_word2idx, opt, srcLang_path=None, t
 
     return data_set
 
-def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_file_name='bleu_scores.txt', detok_lang=''):
+def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_file_name='bleu_scores.txt', detok_lang='', beam_size=1):
     model_translate.eval()
     with open(output_name, 'w') as f:
         for batch in tqdm(data_set, mininterval=2, desc='  - (Translate and BLEU)', leave=False):
@@ -159,8 +159,10 @@ def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_
             src_lang_oneHot_forDec = model_translate.lang2oneHot(src_lang_seq, model_opt.srcLangIdx2oneHotIdx)[sent_sort_idx] if model_opt.dec_srcLang_oh else None
             tgt_lang_oneHot_forDec = model_translate.lang2oneHot(tgt_lang_seq, model_opt.tgtLangIdx2oneHotIdx)[sent_sort_idx] if model_opt.dec_tgtLang_oh else None
 
-            all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx],
-                l_in=tgt_lang_seq_forDec, src_lang_oneHot=src_lang_oneHot_forDec, tgt_lang_oneHot=tgt_lang_oneHot_forDec)
+            #all_hyp = model_translate.decoder.greedy_search(enc_output, lengths_seq_src[sent_sort_idx],
+            #    l_in=tgt_lang_seq_forDec, src_lang_oneHot=src_lang_oneHot_forDec, tgt_lang_oneHot=tgt_lang_oneHot_forDec)
+            all_hyp = model_translate.decoder.beam_search(enc_output, lengths_seq_src[sent_sort_idx], beam_size,
+                            l_in=tgt_lang_seq_forDec, src_lang_oneHot=src_lang_oneHot_forDec, tgt_lang_oneHot=tgt_lang_oneHot_forDec)
 
             _, sent_revert_idx = sent_sort_idx.sort()
             sent_revert_idx = sent_revert_idx.data.view(-1).tolist()
@@ -172,7 +174,7 @@ def translate_data(model_translate, data_set, output_name, model_opt, ref, bleu_
                 if len(idx_seq) > 0: 
                     if idx_seq[-1] == Constants.EOS: # if last word is EOS
                         idx_seq = idx_seq[:-1]
-                    pred_line = ' '.join([data_set.tgt_idx2word[idx] for idx in idx_seq])
+                    pred_line = ' '.join([data_set.tgt_idx2word[idx] for idx in idx_seq[1:]]) # idx_seq[1:] to remove BOS with beam_search
                     f.write(pred_line + '\n')
                 else:
                     f.write('\n')
@@ -231,6 +233,8 @@ def main():
 
     parser.add_argument('-detok_lang', type=str, default='', help='Language of the folder. Ex: en, fr, de ...')
 
+    parser.add_argument('-beam_size', type=int, default=1)
+
     opt = parser.parse_args()
     
     opt.cuda = not opt.no_cuda
@@ -264,7 +268,7 @@ def main():
     data_set = prepare_data(opt.val, src_word2idx, tgt_word2idx, opt, tgtLang_path=opt.val_tgtlang, srcLang_path=opt.val_srclang)
 
     translate_data(model_translate, data_set, output_name, model_opt, opt.ref,
-        bleu_file_name=opt.bleu_file_name, detok_lang=opt.detok_lang)
+        bleu_file_name=opt.bleu_file_name, detok_lang=opt.detok_lang, beam_size=opt.beam_size)
 
 if __name__ == '__main__':
     main()
