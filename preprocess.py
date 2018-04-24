@@ -275,7 +275,8 @@ def main():
 
     # Build vocabulary
     if opt.vocab:
-        predefined_data = torch.load(opt.vocab)
+        with open(opt.vocab, 'rb') as f:
+            predefined_data = pickle.load(f)
         assert 'dict' in predefined_data
 
         print('[Info] Pre-defined vocabulary found.')
