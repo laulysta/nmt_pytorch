@@ -332,6 +332,9 @@ def load_model(opt):
     
     modelRNN.load_state_dict(checkpoint['model'])
 
+    if not opt.no_reload_optimizer:
+        opt.lr = model_opt.lr
+
     if opt.optim == 'adadelta':
         optimizer = optim.Adadelta(modelRNN.parameters(),
                                     lr=1.0, rho=0.95, eps=1e-06, weight_decay=0)
