@@ -329,7 +329,7 @@ def load_model(opt):
         share_dec_temp=model_opt.share_dec_temp,
         cuda=opt.cuda)
 
-    opt.lr = model_opt.lr
+    
     modelRNN.load_state_dict(checkpoint['model'])
 
     if opt.optim == 'adadelta':
