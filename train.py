@@ -346,6 +346,7 @@ def load_model(opt):
 
     if not opt.no_reload_optimizer:
         optimizer.load_state_dict(checkpoint['optimizer'])
+    else:
 
     return modelRNN, optimizer, epoch_i, best_BLEU, patience_count
 
