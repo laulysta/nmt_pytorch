@@ -33,7 +33,16 @@ def get_loss(crit, pred, gold, opt, smoothing_eps=0.1):
     ''' Apply label smoothing if needed '''
 
     gold = gold.contiguous().view(-1)
-    
+
+    #import ipdb;ipdb.set_trace()
+    if opt.simple_dist_precision > 0:
+    #precision = 1
+        topk_pred = pred.data.topk(opt.simple_dist_precision)[1]
+        mask_sd = torch.zeros_like(gold.data)
+        for ii in range(opt.simple_dist_precision):
+            mask_sd += (gold.data == topk_pred[:,ii]).long()
+        gold.data = gold.data * mask_sd
+
     loss = crit(pred, gold)
 
     if opt.smoothing and smoothing_eps:
@@ -440,6 +449,8 @@ def main():
     parser.add_argument('-share_bidir', action='store_true')
     parser.add_argument('-share_enc_dec', action='store_true')
     parser.add_argument('-share_dec_temp', action='store_true')
+
+    parser.add_argument('-simple_dist_precision', type=int, default=0)
 
     opt = parser.parse_args()
 
