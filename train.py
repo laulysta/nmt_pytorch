@@ -36,11 +36,13 @@ def get_loss(crit, pred, gold, opt, smoothing_eps=0.1):
 
     #import ipdb;ipdb.set_trace()
     if opt.simple_dist_precision > 0:
-    #precision = 1
         topk_pred = pred.data.topk(opt.simple_dist_precision)[1]
-        mask_sd = torch.zeros_like(gold.data)
-        for ii in range(opt.simple_dist_precision):
-            mask_sd += (gold.data == topk_pred[:,ii]).long()
+        #mask_sd = torch.zeros_like(gold.data)
+        #for ii in range(opt.simple_dist_precision):
+        #    mask_sd += (gold.data == topk_pred[:,ii]).long()
+        gold_rep = (gold.data.repeat(opt.simple_dist_precision,1).transpose(1,0))
+        mask_sd = (gold_rep == topk_pred).sum(1).long()
+
         gold.data = gold.data * mask_sd
 
     loss = crit(pred, gold)
@@ -336,6 +338,7 @@ def load_model(opt):
         share_bidir=model_opt.share_bidir,
         share_enc_dec=model_opt.share_enc_dec,
         share_dec_temp=model_opt.share_dec_temp,
+        simple_dist_precision=opt.simple_dist_precision,
         cuda=opt.cuda)
 
     
@@ -559,6 +562,7 @@ def main():
             share_bidir=opt.share_bidir,
             share_enc_dec=opt.share_enc_dec,
             share_dec_temp=opt.share_dec_temp,
+            simple_dist_precision=opt.simple_dist_precision,
             cuda=opt.cuda)
 
         #print(modelRNN)

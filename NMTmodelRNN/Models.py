@@ -272,7 +272,7 @@ class Decoder(nn.Module):
     def __init__(
              self, n_tgt_vocab, n_max_seq, n_layers=2,
              d_word_vec=512, d_model=512, dropout=0.5, no_proj_share_weight=True,
-             nb_lang_src=0, nb_lang_tgt=0, cuda=False):
+             nb_lang_src=0, nb_lang_tgt=0, simple_dist_precision=0, cuda=False):
         super(Decoder, self).__init__()
         self.tt = torch.cuda if cuda else torch
         d_ctx = d_model*2
@@ -322,6 +322,7 @@ class Decoder(nn.Module):
             assert self.emb.weight.size() == self.fin_to_voc.weight.size()
             self.emb.weight = self.fin_to_voc.weight
 
+        self.simple_dist_precision = simple_dist_precision
         self.n_layers = n_layers
         self.d_ctx = d_ctx
         self.d_model = d_model
@@ -354,7 +355,7 @@ class Decoder(nn.Module):
 
         y_in_emb = self.emb(y_in) # (batch_size, y_seq_len, d_word_vec)
         y_in_emb = self.drop(y_in_emb) # (batch_size, y_seq_len, d_word_vec)
-
+        #import ipdb; ipdb.set_trace()
         if l_in is not None:
             l_in_emb = self.emb(l_in)
             y_in_emb = torch.cat((l_in_emb, y_in_emb), dim=1) # (batch_size, x_seq_len+1, D_emb)
@@ -375,7 +376,7 @@ class Decoder(nn.Module):
 
         ctx_h = self.h_to_ctx( h_in_big ).view(batch_size, x_seq_len, self.d_ctx)
                 # (batch_size, x_seq_len, d_ctx)
-
+        y_in_emb_t = y_in_emb[:,0,:]
         logits = []
         for idx in range(y_seq_len):
             #ctx_s_t_ = s_tm1.transpose(0,1).contiguous().view(batch_size, -1) \
@@ -383,14 +384,14 @@ class Decoder(nn.Module):
 
             # in (batch_size, 1, d_word_vec)
             # s_t (n_layers, batch_size, d_model)
-            _, s_t_ = self.rnn1( y_in_emb[:,idx,:][:,None,:], s_t )
+            _, s_t_ = self.rnn1( y_in_emb_t[:,None,:], s_t )
             # out (batch_size, 1, d_model)
             # s_t (n_layers, batch_size, d_model)
             ctx_s_t_ = s_t_.transpose(0,1).contiguous().view(batch_size, -1) \
                     # (batch_size, d_model * n_layers)
 
 
-            ctx_y = self.y_to_ctx( y_in_emb[:,idx,:] )[:,None,:] # (batch_size, 1, d_ctx)
+            ctx_y = self.y_to_ctx( y_in_emb_t )[:,None,:] # (batch_size, 1, d_ctx)
             ctx_s = self.s_to_ctx( ctx_s_t_ )[:,None,:]
             ctx = F.tanh(ctx_y + ctx_s + ctx_h) # (batch_size, x_seq_len, d_ctx)
             ctx = ctx.view(-1, self.d_ctx) # (batch_size * x_seq_len, d_ctx)
@@ -414,13 +415,30 @@ class Decoder(nn.Module):
             # out, s_t = self.rnn( torch.cat((y_in_emb_andMore[:,idx,:][:,None,:], c_t[:,None,:]), dim=2), s_tm1 )
             out, s_t = self.rnn2( c_t_andMore[:,None,:], s_t_ )
 
-            fin_y = self.y_to_fin( y_in_emb[:,idx,:] ) # (batch_size, d_word_vec)
+            fin_y = self.y_to_fin( y_in_emb_t ) # (batch_size, d_word_vec)
             fin_c = self.c_to_fin( c_t ) # (batch_size, d_word_vec)
             fin_s = self.s_to_fin( out.view(-1, self.d_model) ) # (batch_size, d_word_vec)
             fin = F.tanh( fin_y + fin_c + fin_s )
             fin = self.drop(fin)
 
             logit = self.fin_to_voc( fin ) # (batch_size, vocab_size)
+
+            #######################
+            #import ipdb; ipdb.set_trace()
+            if idx < y_seq_len-1:
+                #precision = 5
+                if self.simple_dist_precision:
+                    y_in_t = y_in.data[:,idx+1]
+                    topk_pred = logit.data.topk(self.simple_dist_precision)[1]
+                    tgt_rep = (y_in_t.repeat(self.simple_dist_precision,1).transpose(1,0))
+                    mask_sd = (tgt_rep == topk_pred).sum(1).long()
+                    y_in_sd = (y_in_t * mask_sd) + (topk_pred[:,0] * (1 - mask_sd))
+                    y_in_sd = Variable(y_in_sd)
+                    y_in_emb_t = self.emb(y_in_sd)
+                else:
+                    y_in_emb_t = y_in_emb[:,idx,:]
+            #######################
+
             logits.append( logit )
 
             # logits : list of (batch_size, vocab_size) vectors
@@ -710,7 +728,7 @@ class NMTmodelRNN(nn.Module):
             enc_lang=False, dec_lang=False,
             enc_srcLang_oh=False, enc_tgtLang_oh=False, dec_srcLang_oh=False, dec_tgtLang_oh=False,
             srcLangIdx2oneHotIdx={}, tgtLangIdx2oneHotIdx={},
-            share_bidir=False, share_enc_dec=False, share_dec_temp=False, cuda=False):
+            share_bidir=False, share_enc_dec=False, share_dec_temp=False, simple_dist_precision=0, cuda=False):
 
 
         self.n_layers = n_layers
@@ -721,9 +739,10 @@ class NMTmodelRNN(nn.Module):
             n_tgt_vocab, n_max_seq, n_layers=n_layers,
             d_word_vec=d_word_vec, d_model=d_model,
             dropout=dropout, no_proj_share_weight = no_proj_share_weight,
-            cuda=cuda,
             nb_lang_src=len(srcLangIdx2oneHotIdx)*dec_srcLang_oh,
-            nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*dec_tgtLang_oh)
+            nb_lang_tgt=len(tgtLangIdx2oneHotIdx)*dec_tgtLang_oh,
+            simple_dist_precision=simple_dist_precision,
+            cuda=cuda)
 
         
         # self.encoder = Encoder(n_src_vocab, n_max_seq, n_layers=n_layers,
