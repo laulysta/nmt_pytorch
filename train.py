@@ -43,7 +43,7 @@ def get_loss(crit, pred, gold, opt, smoothing_eps=0.1):
         gold_rep = (gold.data.repeat(opt.simple_dist_precision,1).transpose(1,0))
         mask_sd = (gold_rep == topk_pred).sum(1).long()
 
-        gold.data = gold.data * mask_sd
+        gold.data = (gold.data * mask_sd) + (topk_pred[:,0] * (1 - mask_sd))
 
     loss = crit(pred, gold)
 
